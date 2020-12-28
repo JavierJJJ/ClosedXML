@@ -16,6 +16,7 @@ namespace ClosedXML.Excel.Drawings
         public XLPictures(XLWorksheet worksheet)
         {
             _worksheet = worksheet;
+            Deleted = new HashSet<String>();
         }
 
         public int Count
@@ -23,6 +24,8 @@ namespace ClosedXML.Excel.Drawings
             [DebuggerStepThrough]
             get { return _pictures.Count; }
         }
+
+        internal ICollection<String> Deleted { get; private set; }
 
         public IXLPicture Add(Stream stream)
         {
@@ -39,7 +42,7 @@ namespace ClosedXML.Excel.Drawings
             return picture;
         }
 
-        public Drawings.IXLPicture Add(Stream stream, XLPictureFormat format)
+        public IXLPicture Add(Stream stream, XLPictureFormat format)
         {
             var picture = new XLPicture(_worksheet, stream, format);
             _pictures.Add(picture);
@@ -71,9 +74,9 @@ namespace ClosedXML.Excel.Drawings
 
         public IXLPicture Add(string imageFile)
         {
-            using (var bitmap = Image.FromFile(imageFile) as Bitmap)
+            using (var fs = File.OpenRead(imageFile))
             {
-                var picture = new XLPicture(_worksheet, bitmap);
+                var picture = new XLPicture(_worksheet, fs);
                 _pictures.Add(picture);
                 picture.Name = GetNextPictureName();
                 return picture;
@@ -87,6 +90,11 @@ namespace ClosedXML.Excel.Drawings
             return picture;
         }
 
+        public bool Contains(string pictureName)
+        {
+            return _pictures.Any(p => string.Equals(p.Name, pictureName, StringComparison.OrdinalIgnoreCase));
+        }
+
         public void Delete(IXLPicture picture)
         {
             Delete(picture.Name);
@@ -94,7 +102,20 @@ namespace ClosedXML.Excel.Drawings
 
         public void Delete(string pictureName)
         {
-            _pictures.RemoveAll(picture => picture.Name.Equals(pictureName, StringComparison.OrdinalIgnoreCase));
+            var picturesToDelete = _pictures
+                .Where(picture => picture.Name.Equals(pictureName, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (!picturesToDelete.Any())
+                throw new ArgumentOutOfRangeException(nameof(pictureName), $"Picture {pictureName} was not found.");
+
+            foreach (var picture in picturesToDelete)
+            {
+                if (!string.IsNullOrEmpty(picture.RelId))
+                    Deleted.Add(picture.RelId);
+
+                _pictures.Remove(picture);
+            }
         }
 
         IEnumerator<IXLPicture> IEnumerable<IXLPicture>.GetEnumerator()
@@ -114,12 +135,10 @@ namespace ClosedXML.Excel.Drawings
 
         public IXLPicture Picture(string pictureName)
         {
-            IXLPicture p;
-
-            if (TryGetPicture(pictureName, out p))
+            if (TryGetPicture(pictureName, out IXLPicture p))
                 return p;
 
-            throw new ArgumentException($"There isn't a picture named '{pictureName}'.");
+            throw new ArgumentOutOfRangeException(nameof(pictureName), $"Picture {pictureName} was not found.");
         }
 
         public bool TryGetPicture(string pictureName, out IXLPicture picture)
@@ -127,11 +146,19 @@ namespace ClosedXML.Excel.Drawings
             var matches = _pictures.Where(p => p.Name.Equals(pictureName, StringComparison.OrdinalIgnoreCase));
             if (matches.Any())
             {
-                picture = matches.Single();
+                picture = matches.First();
                 return true;
             }
             picture = null;
             return false;
+        }
+
+        internal IXLPicture Add(Stream stream, string name, int Id)
+        {
+            var picture = Add(stream) as XLPicture;
+            picture.SetName(name);
+            picture.Id = Id;
+            return picture;
         }
 
         private String GetNextPictureName()

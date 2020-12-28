@@ -6,46 +6,34 @@ namespace ClosedXML.Excel
 {
     using System.Collections;
 
-    internal class XLRows : IXLRows, IXLStylized
+    internal class XLRows : XLStylizedBase, IXLRows, IXLStylized
     {
-        public Boolean StyleChanged { get; set; }
         private readonly List<XLRow> _rows = new List<XLRow>();
         private readonly XLWorksheet _worksheet;
-        internal IXLStyle style;
 
-        public XLRows(XLWorksheet worksheet)
+
+        /// <summary>
+        /// Create a new instance of <see cref="XLRows"/>.
+        /// </summary>
+        /// <param name="worksheet">If worksheet is specified it means that the created instance represents
+        /// all rows on a worksheet so changing its height will affect all rows.</param>
+        /// <param name="defaultStyle">Default style to use when initializing child entries.</param>
+        public XLRows(XLWorksheet worksheet, XLStyleValue defaultStyle = null)
+            : base(defaultStyle)
         {
             _worksheet = worksheet;
-            style = new XLStyle(this, XLWorkbook.DefaultStyle);
         }
 
         #region IXLRows Members
 
         public IEnumerator<IXLRow> GetEnumerator()
         {
-            return _rows.Cast<IXLRow>().OrderBy(r=>r.RowNumber()).GetEnumerator();
+            return _rows.Cast<IXLRow>().OrderBy(r => r.RowNumber()).GetEnumerator();
         }
 
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
-        }
-
-        public IXLStyle Style
-        {
-            get { return style; }
-            set
-            {
-                style = new XLStyle(this, value);
-
-                if (_worksheet != null)
-                    _worksheet.Style = value;
-                else
-                {
-                    foreach (XLRow row in _rows)
-                        row.Style = value;
-                }
-            }
         }
 
         public double Height
@@ -71,10 +59,13 @@ namespace ClosedXML.Excel
                 var toDelete = new Dictionary<IXLWorksheet, List<Int32>>();
                 foreach (XLRow r in _rows)
                 {
-                    if (!toDelete.ContainsKey(r.Worksheet))
-                        toDelete.Add(r.Worksheet, new List<Int32>());
+                    if (!toDelete.TryGetValue(r.Worksheet, out List<Int32> list))
+                    {
+                        list = new List<Int32>();
+                        toDelete.Add(r.Worksheet, list);
+                    }
 
-                    toDelete[r.Worksheet].Add(r.RowNumber());
+                    list.Add(r.RowNumber());
                 }
 
                 foreach (KeyValuePair<IXLWorksheet, List<int>> kp in toDelete)
@@ -120,7 +111,6 @@ namespace ClosedXML.Excel
             _rows.ForEach(r => r.AdjustToContents(startColumn, endColumn, minHeight, maxHeight));
             return this;
         }
-
 
         public void Hide()
         {
@@ -174,7 +164,7 @@ namespace ClosedXML.Excel
 
         public IXLCells Cells()
         {
-            var cells = new XLCells(false, false);
+            var cells = new XLCells(false, XLCellsUsedOptions.AllContents);
             foreach (XLRow container in _rows)
                 cells.Add(container.RangeAddress);
             return cells;
@@ -182,15 +172,23 @@ namespace ClosedXML.Excel
 
         public IXLCells CellsUsed()
         {
-            var cells = new XLCells(true, false);
+            var cells = new XLCells(true, XLCellsUsedOptions.AllContents);
             foreach (XLRow container in _rows)
                 cells.Add(container.RangeAddress);
             return cells;
         }
 
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         public IXLCells CellsUsed(Boolean includeFormats)
         {
-            var cells = new XLCells(true, includeFormats);
+            return CellsUsed(includeFormats
+                ? XLCellsUsedOptions.All
+                : XLCellsUsedOptions.AllContents);
+        }
+
+        public IXLCells CellsUsed(XLCellsUsedOptions options)
+        {
+            var cells = new XLCells(true, options);
             foreach (XLRow container in _rows)
                 cells.Add(container.RangeAddress);
             return cells;
@@ -203,22 +201,34 @@ namespace ClosedXML.Excel
             return this;
         }
 
-        public IXLRows SetDataType(XLCellValues dataType)
+        public IXLRows SetDataType(XLDataType dataType)
         {
             _rows.ForEach(c => c.DataType = dataType);
             return this;
         }
 
-        #endregion
+        #endregion IXLRows Members
 
         #region IXLStylized Members
-
-        public IEnumerable<IXLStyle> Styles
+        protected override IEnumerable<XLStylizedBase> Children
         {
             get
             {
-                UpdatingStyle = true;
-                yield return style;
+                if (_worksheet != null)
+                    yield return _worksheet;
+                else
+                {
+                    foreach (XLRow row in _rows)
+                        yield return row;
+                }
+            }
+        }
+
+        public override IEnumerable<IXLStyle> Styles
+        {
+            get
+            {
+                yield return Style;
                 if (_worksheet != null)
                     yield return _worksheet.Style;
                 else
@@ -228,19 +238,10 @@ namespace ClosedXML.Excel
                         yield return s;
                     }
                 }
-                UpdatingStyle = false;
             }
         }
-
-        public Boolean UpdatingStyle { get; set; }
-
-        public IXLStyle InnerStyle
-        {
-            get { return style; }
-            set { style = new XLStyle(this, value); }
-        }
-
-        public IXLRanges RangesUsed
+        
+        public override IXLRanges RangesUsed
         {
             get
             {
@@ -250,23 +251,17 @@ namespace ClosedXML.Excel
             }
         }
 
-        #endregion
+        #endregion IXLStylized Members
 
         public void Add(XLRow row)
         {
             _rows.Add(row);
         }
 
-        public IXLRows Clear(XLClearOptions clearOptions = XLClearOptions.ContentsAndFormats)
+        public IXLRows Clear(XLClearOptions clearOptions = XLClearOptions.All)
         {
             _rows.ForEach(c => c.Clear(clearOptions));
             return this;
-        }
-
-        public void Dispose()
-        {
-            if (_rows != null)
-                _rows.ForEach(r => r.Dispose());
         }
 
         public void Select()

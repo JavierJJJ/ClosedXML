@@ -26,20 +26,25 @@ namespace ClosedXML.Excel
         /// The type of the cell's data.
         /// </value>
         /// <exception cref="ArgumentException"></exception>
-        XLCellValues DataType { set; }
+        XLDataType DataType { set; }
 
-        IXLCells SetDataType(XLCellValues dataType);
+        IXLCells SetDataType(XLDataType dataType);
 
         /// <summary>
         /// Clears the contents of these cells.
         /// </summary>
         /// <param name="clearOptions">Specify what you want to clear.</param>
-        IXLCells Clear(XLClearOptions clearOptions = XLClearOptions.ContentsAndFormats);
+        IXLCells Clear(XLClearOptions clearOptions = XLClearOptions.All);
 
         /// <summary>
         /// Delete the comments of these cells.
         /// </summary>
         void DeleteComments();
+
+        /// <summary>
+        /// Delete the sparklines of these cells.
+        /// </summary>
+        void DeleteSparklines();
 
         /// <summary>
         /// Sets the cells' formula with A1 references.

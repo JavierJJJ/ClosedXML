@@ -1,10 +1,15 @@
-using System;
+﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Data;
+using System.Diagnostics;
+using System.Dynamic;
 using System.Linq;
 using System.Text;
 
 namespace ClosedXML.Excel
 {
+    [DebuggerDisplay("{Name}")]
     internal class XLTable : XLRange, IXLTable
     {
         #region Private fields
@@ -13,85 +18,104 @@ namespace ClosedXML.Excel
         internal bool _showTotalsRow;
         internal HashSet<String> _uniqueNames;
 
-        #endregion
+        #endregion Private fields
 
         #region Constructor
 
-        public XLTable(XLRange range, Boolean addToTables, Boolean setAutofilter = true)
-            : base(new XLRangeParameters(range.RangeAddress, range.Style ))
+        /// <summary>
+        /// The direct contructor should only be used in <see cref="XLWorksheet.RangeFactory"/>.
+        /// </summary>
+        public XLTable(XLRangeParameters xlRangeParameters)
+            : base(xlRangeParameters)
         {
-            InitializeValues(setAutofilter);
-
-            Int32 id = 1;
-            while (true)
-            {
-                string tableName = String.Format("Table{0}", id);
-                if (!Worksheet.Tables.Any(t => t.Name == tableName))
-                {
-                    Name = tableName;
-                    AddToTables(range, addToTables);
-                    break;
-                }
-                id++;
-            }
+            InitializeValues(false);
         }
 
-        public XLTable(XLRange range, String name, Boolean addToTables, Boolean setAutofilter = true)
-            : base(new XLRangeParameters(range.RangeAddress, range.Style))
+        #endregion Constructor
+
+        public override XLRangeType RangeType
         {
-            InitializeValues(setAutofilter);
-
-            Name = name;
-            AddToTables(range, addToTables);
+            get { return XLRangeType.Table; }
         }
-
-        #endregion
 
         private IXLRangeAddress _lastRangeAddress;
         private Dictionary<String, IXLTableField> _fieldNames = null;
+
         public Dictionary<String, IXLTableField> FieldNames
         {
             get
             {
-                if (_fieldNames != null && _lastRangeAddress != null && _lastRangeAddress.Equals(RangeAddress)) return _fieldNames;
+                if (_fieldNames != null && _lastRangeAddress != null && _lastRangeAddress.Equals(RangeAddress))
+                    return _fieldNames;
 
-                _fieldNames = new Dictionary<String, IXLTableField>();
-                _lastRangeAddress = RangeAddress;
-
-                if (ShowHeaderRow)
+                if (_fieldNames == null)
                 {
-                    var headersRow = HeadersRow();
-                    Int32 cellPos = 0;
-                    foreach (var cell in headersRow.Cells())
-                    {
-                        var name = cell.GetString();
-                        if (XLHelper.IsNullOrWhiteSpace(name))
-                        {
-                            name = "Column" + (cellPos + 1);
-                            cell.SetValue(name);
-                        }
-                        if (_fieldNames.ContainsKey(name))
-                            throw new ArgumentException("The header row contains more than one field name '" + name + "'.");
-
-                        _fieldNames.Add(name, new XLTableField(this, name) {Index = cellPos++ });
-                    }
+                    _fieldNames = new Dictionary<String, IXLTableField>(StringComparer.OrdinalIgnoreCase);
+                    _lastRangeAddress = RangeAddress;
+                    HeadersRow();
                 }
                 else
                 {
-                    if (_fieldNames == null) _fieldNames = new Dictionary<String, IXLTableField>();
+                    HeadersRow(false);
+                }
 
-                    Int32 colCount = ColumnCount();
-                    for (Int32 i = 1; i <= colCount; i++)
+                RescanFieldNames();
+
+                _lastRangeAddress = RangeAddress;
+
+                return _fieldNames;
+            }
+        }
+
+        private void RescanFieldNames()
+        {
+            if (ShowHeaderRow)
+            {
+                var detectedFieldNames = new Dictionary<String, IXLTableField>();
+                var headersRow = HeadersRow(false);
+                Int32 cellPos = 0;
+                foreach (var cell in headersRow.Cells())
+                {
+                    var name = cell.GetString();
+                    if (_fieldNames.TryGetValue(name, out IXLTableField tableField) && tableField.Column.ColumnNumber() == cell.Address.ColumnNumber)
                     {
-                        if (!_fieldNames.Values.Any(f => f.Index == i - 1))
-                        {
-                            var name = "Column" + i;
+                        (tableField as XLTableField).Index = cellPos;
+                        detectedFieldNames.Add(name, _fieldNames[name]);
+                        cellPos++;
+                        continue;
+                    }
 
-                            _fieldNames.Add(name, new XLTableField(this, name) {Index = i - 1 });
-                        }
+                    // Be careful here. Fields names may actually be whitespace, but not empty
+                    if (String.IsNullOrEmpty(name))
+                    {
+                        name = GetUniqueName("Column", cellPos + 1, true);
+                        cell.SetValue(name);
+                        cell.DataType = XLDataType.Text;
+                    }
+                    if (_fieldNames.ContainsKey(name))
+                        throw new ArgumentException("The header row contains more than one field name '" + name + "'.");
+
+                    _fieldNames.Add(name, new XLTableField(this, name) { Index = cellPos++ });
+                    detectedFieldNames.Add(name, _fieldNames[name]);
+                }
+
+                _fieldNames.Keys
+                    .Where(key => !detectedFieldNames.ContainsKey(key))
+                    .ToArray()
+                    .ForEach(key => _fieldNames.Remove(key));
+            }
+            else
+            {
+                Int32 colCount = ColumnCount();
+                for (Int32 i = 1; i <= colCount; i++)
+                {
+                    if (_fieldNames.Values.All(f => f.Index != i - 1))
+                    {
+                        var name = "Column" + i;
+
+                        _fieldNames.Add(name, new XLTableField(this, name) { Index = i - 1 });
                     }
                 }
-                return _fieldNames;
             }
         }
 
@@ -100,12 +124,20 @@ namespace ClosedXML.Excel
             _fieldNames = new Dictionary<String, IXLTableField>();
 
             Int32 cellPos = 0;
-            foreach(var name in fieldNames)
+            foreach (var name in fieldNames)
             {
                 _fieldNames.Add(name, new XLTableField(this, name) { Index = cellPos++ });
             }
         }
 
+        internal void RenameField(String oldName, String newName)
+        {
+            if (!_fieldNames.TryGetValue(oldName, out IXLTableField field))
+                throw new ArgumentException("The field does not exist in this table", "oldName");
+
+            _fieldNames.Remove(oldName);
+            _fieldNames.Add(newName, field);
+        }
 
         internal String RelId { get; set; }
 
@@ -114,46 +146,47 @@ namespace ClosedXML.Excel
             get
             {
                 XLRange range;
-                //var ws = Worksheet;
-                //var tracking = ws.EventTrackingEnabled;
-                //ws.EventTrackingEnabled = false;
+
+                var firstDataRowNumber = 1;
+                var lastDataRowNumber = RowCount();
 
                 if (_showHeaderRow)
-                {
-                    range = _showTotalsRow
-                                ? Range(2, 1,RowCount() - 1,ColumnCount())
-                                : Range(2, 1, RowCount(), ColumnCount());
-                }
-                else
-                {
-                    range = _showTotalsRow
-                                ? Range(1, 1, RowCount() - 1, ColumnCount())
-                                : Range(1, 1, RowCount(), ColumnCount());
-                }
-                //ws.EventTrackingEnabled = tracking;
+                    firstDataRowNumber++;
+
+                if (_showTotalsRow)
+                    lastDataRowNumber--;
+
+                if (firstDataRowNumber > lastDataRowNumber)
+                    return null;
+
+                range = Range(firstDataRowNumber, 1, lastDataRowNumber, ColumnCount());
+
                 return new XLTableRange(range, this);
             }
         }
 
         private XLAutoFilter _autoFilter;
+
         public XLAutoFilter AutoFilter
         {
             get
             {
-                using (var asRange = ShowTotalsRow ? Range(1, 1, RowCount() - 1, ColumnCount()) : AsRange())
-                {
-                    if (_autoFilter == null)
-                        _autoFilter = new XLAutoFilter();
+                if (_autoFilter == null)
+                    _autoFilter = new XLAutoFilter();
 
-                    _autoFilter.Range = asRange;
-                }
+                _autoFilter.Range = ShowTotalsRow ? Range(1, 1, RowCount() - 1, ColumnCount()) : AsRange();
                 return _autoFilter;
             }
         }
 
-        public new IXLBaseAutoFilter SetAutoFilter()
+        public override IXLAutoFilter SetAutoFilter()
         {
             return AutoFilter;
+        }
+
+        protected override void OnRangeAddressChanged(XLRangeAddress oldAddress, XLRangeAddress newAddress)
+        {
+            //Do nothing for table
         }
 
         #region IXLTable Members
@@ -164,10 +197,13 @@ namespace ClosedXML.Excel
         public Boolean ShowColumnStripes { get; set; }
 
         private Boolean _showAutoFilter;
-        public Boolean ShowAutoFilter {
+
+        public Boolean ShowAutoFilter
+        {
             get { return _showHeaderRow && _showAutoFilter; }
             set { _showAutoFilter = value; }
-            }
+        }
+
         public XLTableTheme Theme { get; set; }
 
         public String Name
@@ -175,13 +211,26 @@ namespace ClosedXML.Excel
             get { return _name; }
             set
             {
-                if (Worksheet.Tables.Any(t => t.Name == value))
-                {
-                    throw new ArgumentException(String.Format("This worksheet already contains a table named '{0}'",
-                                                              value));
-                }
+                if (_name == value) return;
+
+                // Validation rules for table names
+                var oldname = _name ?? string.Empty;
+
+                if (!XLHelper.ValidateName("table", value, oldname, Worksheet.Tables.Select(t => t.Name), out String message))
+                    throw new ArgumentException(message, nameof(value));
 
                 _name = value;
+
+                // Some totals row formula depend on the table name. Update them.
+                if (_fieldNames?.Any() ?? false)
+                    this.Fields.ForEach(f => (f as XLTableField).UpdateTableFieldTotalsRowFormula());
+
+                if (!String.IsNullOrWhiteSpace(oldname) && !String.Equals(oldname, _name, StringComparison.OrdinalIgnoreCase))
+                {
+                    Worksheet.Tables.Add(this);
+                    if (Worksheet.Tables.Contains(oldname))
+                        Worksheet.Tables.Remove(oldname);
+                }
             }
         }
 
@@ -197,6 +246,9 @@ namespace ClosedXML.Excel
 
                 _showTotalsRow = value;
 
+                // Invalidate fields' columns
+                this.Fields.Cast<XLTableField>().ForEach(f => f.Column = null);
+
                 if (_showTotalsRow)
                 {
                     AutoFilter.Range = Worksheet.Range(
@@ -210,9 +262,18 @@ namespace ClosedXML.Excel
 
         public IXLRangeRow HeadersRow()
         {
+            return HeadersRow(true);
+        }
+
+        internal IXLRangeRow HeadersRow(Boolean scanForNewFieldsNames)
+        {
             if (!ShowHeaderRow) return null;
 
-            var m = FieldNames;
+            if (scanForNewFieldsNames)
+            {
+                var tempResult = FieldNames;
+            }
+
             return FirstRow();
         }
 
@@ -239,6 +300,126 @@ namespace ClosedXML.Excel
                 for (int co = 0; co < columnCount; co++)
                     yield return Field(co);
             }
+        }
+
+        public IXLTable Resize(IXLRangeAddress rangeAddress)
+        {
+            return Resize(Worksheet.Range(RangeAddress));
+        }
+
+        public IXLTable Resize(string rangeAddress)
+        {
+            return Resize(Worksheet.Range(RangeAddress));
+        }
+
+        public IXLTable Resize(IXLCell firstCell, IXLCell lastCell)
+        {
+            return Resize(Worksheet.Range(firstCell, lastCell));
+        }
+
+        public IXLTable Resize(string firstCellAddress, string lastCellAddress)
+        {
+            return Resize(Worksheet.Range(firstCellAddress, lastCellAddress));
+        }
+
+        public IXLTable Resize(IXLAddress firstCellAddress, IXLAddress lastCellAddress)
+        {
+            return Resize(Worksheet.Range(firstCellAddress, lastCellAddress));
+        }
+
+        public IXLTable Resize(int firstCellRow, int firstCellColumn, int lastCellRow, int lastCellColumn)
+        {
+            return Resize(Worksheet.Range(firstCellRow, firstCellColumn, lastCellRow, lastCellColumn));
+        }
+
+        public IXLTable Resize(IXLRange range)
+        {
+            if (!this.ShowHeaderRow)
+                throw new NotImplementedException("Resizing of tables with no headers not supported yet.");
+
+            if (this.Worksheet != range.Worksheet)
+                throw new InvalidOperationException("You cannot resize a table to a range on a different sheet.");
+
+            var totalsRowChanged = this.ShowTotalsRow ? range.LastRow().RowNumber() - this.TotalsRow().RowNumber() : 0;
+            var oldTotalsRowNumber = this.ShowTotalsRow ? this.TotalsRow().RowNumber() : -1;
+
+            var existingHeaders = this.FieldNames.Keys;
+            var newHeaders = new HashSet<string>();
+
+            // Force evaluation of f.Column field
+            var tempArray = this.Fields.Select(f => f.Column).ToArray();
+
+            var firstRow = range.Row(1);
+            if (!firstRow.FirstCell().Address.Equals(this.HeadersRow().FirstCell().Address)
+                || !firstRow.LastCell().Address.Equals(this.HeadersRow().LastCell().Address))
+            {
+                _uniqueNames.Clear();
+                var co = 1;
+                foreach (var c in firstRow.Cells())
+                {
+                    if (String.IsNullOrWhiteSpace(((XLCell)c).InnerText))
+                        c.Value = GetUniqueName("Column", co, true);
+
+                    var header = c.GetString();
+                    _uniqueNames.Add(header);
+
+                    if (!existingHeaders.Contains(header))
+                        newHeaders.Add(header);
+
+                    co++;
+                }
+            }
+
+            if (totalsRowChanged < 0)
+            {
+                range.Rows(r => r.RowNumber().Equals(this.TotalsRow().RowNumber() + totalsRowChanged)).Single().InsertRowsAbove(1);
+                range = Worksheet.Range(range.FirstCell(), range.LastCell().CellAbove());
+                oldTotalsRowNumber++;
+            }
+            else if (totalsRowChanged > 0)
+            {
+                this.TotalsRow().RowBelow(totalsRowChanged + 1).InsertRowsAbove(1);
+                this.TotalsRow().AsRange().Delete(XLShiftDeletedCells.ShiftCellsUp);
+            }
+
+            this.RangeAddress = (XLRangeAddress)range.RangeAddress;
+            RescanFieldNames();
+
+            if (this.ShowTotalsRow)
+            {
+                foreach (var f in this._fieldNames.Values)
+                {
+                    var c = this.TotalsRow().Cell(f.Index + 1);
+                    if (!c.IsEmpty() && newHeaders.Contains(f.Name))
+                    {
+                        f.TotalsRowLabel = c.GetFormattedString();
+                        c.DataType = XLDataType.Text;
+                    }
+                }
+
+                if (totalsRowChanged != 0)
+                {
+                    foreach (var f in this._fieldNames.Values.Cast<XLTableField>())
+                    {
+                        f.UpdateTableFieldTotalsRowFormula();
+                        var c = this.TotalsRow().Cell(f.Index + 1);
+                        if (!String.IsNullOrWhiteSpace(f.TotalsRowLabel))
+                        {
+                            c.DataType = XLDataType.Text;
+
+                            //Remove previous row's label
+                            var oldTotalsCell = this.Worksheet.Cell(oldTotalsRowNumber, f.Column.ColumnNumber());
+                            if (oldTotalsCell.Value.ToString() == f.TotalsRowLabel)
+                                oldTotalsCell.Value = null;
+                        }
+
+                        if (f.TotalsRowFunction != XLTotalsRowFunction.None)
+                            c.DataType = XLDataType.Number;
+                    }
+                }
+            }
+
+            return this;
         }
 
         public IXLTable SetEmphasizeFirstColumn()
@@ -330,53 +511,44 @@ namespace ClosedXML.Excel
                 else
                 {
                     coString = coPairTrimmed;
-                    order = "ASC";
+                    order = sortOrder == XLSortOrder.Ascending ? "ASC" : "DESC";
                 }
 
-                Int32 co;
-                if (!Int32.TryParse(coString, out co))
+                if (!Int32.TryParse(coString, out Int32 co))
                     co = Field(coString).Index + 1;
 
+                if (toSortBy.Length > 0)
+                    toSortBy.Append(',');
+
                 toSortBy.Append(co);
-                toSortBy.Append(" ");
+                toSortBy.Append(' ');
                 toSortBy.Append(order);
-                toSortBy.Append(",");
             }
-            return DataRange.Sort(toSortBy.ToString(0, toSortBy.Length - 1), sortOrder, matchCase, ignoreBlanks);
+            return DataRange.Sort(toSortBy.ToString(), sortOrder, matchCase, ignoreBlanks);
         }
 
-        public new IXLTable Clear(XLClearOptions clearOptions = XLClearOptions.ContentsAndFormats)
+        public new IXLTable Clear(XLClearOptions clearOptions = XLClearOptions.All)
         {
             base.Clear(clearOptions);
             return this;
         }
 
-        IXLBaseAutoFilter IXLTable.AutoFilter
+        IXLAutoFilter IXLTable.AutoFilter
         {
             get { return AutoFilter; }
         }
 
-        public new void Dispose()
-        {
-            if (AutoFilter != null)
-                AutoFilter.Dispose();
-
-            base.Dispose();
-        }
-
-        #endregion
-
-
+        #endregion IXLTable Members
 
         private void InitializeValues(Boolean setAutofilter)
         {
             ShowRowStripes = true;
             _showHeaderRow = true;
-            Theme = XLTableTheme.TableStyleLight9;
+            Theme = XLTableTheme.TableStyleMedium2;
             if (setAutofilter)
                 InitializeAutoFilter();
 
-            HeadersRow().DataType = XLCellValues.Text;
+            AsRange().Row(1).DataType = XLDataType.Text;
 
             if (RowCount() == 1)
                 InsertRowsBelow(1);
@@ -387,29 +559,26 @@ namespace ClosedXML.Excel
             ShowAutoFilter = true;
         }
 
-        private void AddToTables(XLRange range, Boolean addToTables)
+        internal void OnAddedToTables()
         {
-            if (!addToTables) return;
-
             _uniqueNames = new HashSet<string>();
             Int32 co = 1;
-            foreach (IXLCell c in range.Row(1).Cells())
+            foreach (IXLCell c in Row(1).Cells())
             {
-                if (XLHelper.IsNullOrWhiteSpace(((XLCell)c).InnerText))
-                    c.Value = GetUniqueName("Column" + co.ToInvariantString());
+                // Be careful here. Fields names may actually be whitespace, but not empty
+                if (String.IsNullOrEmpty(((XLCell)c).InnerText))
+                    c.Value = GetUniqueName("Column", co, true);
                 _uniqueNames.Add(c.GetString());
                 co++;
             }
-            Worksheet.Tables.Add(this);
         }
 
-
-        private String GetUniqueName(String originalName)
+        private String GetUniqueName(String originalName, Int32 initialOffset, Boolean enforceOffset)
         {
-            String name = originalName;
-            if (_uniqueNames.Contains(name))
+            String name = String.Concat(originalName, enforceOffset ? initialOffset.ToInvariantString() : string.Empty);
+            if (_uniqueNames?.Contains(name) ?? false)
             {
-                Int32 i = 1;
+                Int32 i = initialOffset;
                 name = originalName + i.ToInvariantString();
                 while (_uniqueNames.Contains(name))
                 {
@@ -418,19 +587,23 @@ namespace ClosedXML.Excel
                 }
             }
 
-            _uniqueNames.Add(name);
             return name;
         }
 
         public Int32 GetFieldIndex(String name)
         {
-            if (FieldNames.ContainsKey(name))
-                return FieldNames[name].Index;
+            // There is a discrepancy in the way headers with line breaks are stored.
+            // The entry in the table definition will contain \r\n
+            // but the shared string value of the actual cell will contain only \n
+            name = name.Replace("\r\n", "\n");
+            if (FieldNames.TryGetValue(name, out IXLTableField tableField))
+                return tableField.Index;
 
             throw new ArgumentOutOfRangeException("The header row doesn't contain field name '" + name + "'.");
         }
 
         internal Boolean _showHeaderRow;
+
         public Boolean ShowHeaderRow
         {
             get { return _showHeaderRow; }
@@ -445,75 +618,75 @@ namespace ClosedXML.Excel
                     Int32 co = 1;
                     foreach (IXLCell c in headersRow.Cells())
                     {
-                        if (XLHelper.IsNullOrWhiteSpace(((XLCell)c).InnerText))
-                            c.Value = GetUniqueName("Column" + co.ToInvariantString());
+                        if (String.IsNullOrWhiteSpace(((XLCell)c).InnerText))
+                            c.Value = GetUniqueName("Column", co, true);
                         _uniqueNames.Add(c.GetString());
                         co++;
                     }
 
                     headersRow.Clear();
-                    RangeAddress.FirstAddress = new XLAddress(Worksheet, RangeAddress.FirstAddress.RowNumber + 1,
-                                          RangeAddress.FirstAddress.ColumnNumber,
-                                          RangeAddress.FirstAddress.FixedRow,
-                                          RangeAddress.FirstAddress.FixedColumn);
-
-                    HeadersRow().DataType = XLCellValues.Text;
+                    RangeAddress = new XLRangeAddress(
+                        new XLAddress(Worksheet, RangeAddress.FirstAddress.RowNumber + 1,
+                                      RangeAddress.FirstAddress.ColumnNumber,
+                                      RangeAddress.FirstAddress.FixedRow,
+                                      RangeAddress.FirstAddress.FixedColumn),
+                        RangeAddress.LastAddress);
                 }
                 else
                 {
-                    using(var asRange = Worksheet.Range(
-                        RangeAddress.FirstAddress.RowNumber - 1 ,
+                    var asRange = Worksheet.Range(
+                        RangeAddress.FirstAddress.RowNumber - 1,
                         RangeAddress.FirstAddress.ColumnNumber,
                         RangeAddress.LastAddress.RowNumber,
-                        RangeAddress.LastAddress.ColumnNumber
-                        ))
-                        using (var firstRow = asRange.FirstRow())
-                            {
-                                IXLRangeRow rangeRow;
-                                if (firstRow.IsEmpty(true))
-                                {
-                                    rangeRow = firstRow;
-                                    RangeAddress.FirstAddress = new XLAddress(Worksheet,
-                                          RangeAddress.FirstAddress.RowNumber - 1,
-                                          RangeAddress.FirstAddress.ColumnNumber,
-                                          RangeAddress.FirstAddress.FixedRow,
-                                          RangeAddress.FirstAddress.FixedColumn);
-                                }
-                                else
-                                {
-                                    var fAddress = RangeAddress.FirstAddress;
-                                    var lAddress = RangeAddress.LastAddress;
+                        RangeAddress.LastAddress.ColumnNumber);
+                    var firstRow = asRange.FirstRow();
+                    IXLRangeRow rangeRow;
+                    if (firstRow.IsEmpty(XLCellsUsedOptions.All))
+                    {
+                        rangeRow = firstRow;
+                        RangeAddress = new XLRangeAddress(
+                            new XLAddress(Worksheet,
+                                RangeAddress.FirstAddress.RowNumber - 1,
+                                RangeAddress.FirstAddress.ColumnNumber,
+                                RangeAddress.FirstAddress.FixedRow,
+                                RangeAddress.FirstAddress.FixedColumn),
+                            RangeAddress.LastAddress);
+                    }
+                    else
+                    {
+                        var fAddress = RangeAddress.FirstAddress;
+                        //var lAddress = RangeAddress.LastAddress;
 
-                                    rangeRow = firstRow.InsertRowsBelow(1, false).First();
+                        rangeRow = firstRow.InsertRowsBelow(1, false).First();
 
+                        RangeAddress = new XLRangeAddress(
+                            fAddress,
+                            RangeAddress.LastAddress);
+                    }
 
-                                    RangeAddress.FirstAddress = new XLAddress(Worksheet, fAddress.RowNumber,
-                                                                              fAddress.ColumnNumber,
-                                                                              fAddress.FixedRow,
-                                                                              fAddress.FixedColumn);
-
-                                    RangeAddress.LastAddress = new XLAddress(Worksheet, lAddress.RowNumber + 1,
-                                                                             lAddress.ColumnNumber,
-                                                                             lAddress.FixedRow,
-                                                                             lAddress.FixedColumn);
-                                }
-
-                                Int32 co = 1;
-                                foreach (var name in FieldNames.Values.Select(f => f.Name))
-                                {
-                                    rangeRow.Cell(co).SetValue(name);
-                                    co++;
-                                }
-
-                            }
+                    Int32 co = 1;
+                    foreach (var name in FieldNames.Values.Select(f => f.Name))
+                    {
+                        rangeRow.Cell(co).SetValue(name);
+                        co++;
+                    }
                 }
+
                 _showHeaderRow = value;
+
+                // Invalidate fields' columns
+                this.Fields.Cast<XLTableField>().ForEach(f => f.Column = null);
+
+                if (_showHeaderRow)
+                    HeadersRow().DataType = XLDataType.Text;
             }
         }
+
         public IXLTable SetShowHeaderRow()
         {
             return SetShowHeaderRow(true);
         }
+
         public IXLTable SetShowHeaderRow(Boolean value)
         {
             ShowHeaderRow = value;
@@ -522,11 +695,345 @@ namespace ClosedXML.Excel
 
         public void ExpandTableRows(Int32 rows)
         {
-            RangeAddress.LastAddress = new XLAddress(Worksheet, RangeAddress.LastAddress.RowNumber + rows,
-                                                     RangeAddress.LastAddress.ColumnNumber,
-                                                     RangeAddress.LastAddress.FixedRow,
-                                                     RangeAddress.LastAddress.FixedColumn);
+            RangeAddress = new XLRangeAddress(
+                RangeAddress.FirstAddress,
+                new XLAddress(Worksheet, RangeAddress.LastAddress.RowNumber + rows,
+                                         RangeAddress.LastAddress.ColumnNumber,
+                                         RangeAddress.LastAddress.FixedRow,
+                                         RangeAddress.LastAddress.FixedColumn));
         }
 
+        public override XLRangeColumn Column(int columnNumber)
+        {
+            var column = base.Column(columnNumber);
+            column.Table = this;
+            return column;
+        }
+
+        public override XLRangeColumn Column(string columnName)
+        {
+            var column = base.Column(columnName);
+            column.Table = this;
+            return column;
+        }
+
+        public override IXLRangeColumns Columns(int firstColumn, int lastColumn)
+        {
+            var columns = base.Columns(firstColumn, lastColumn);
+            columns.Cast<XLRangeColumn>().ForEach(column => column.Table = this);
+            return columns;
+        }
+
+        public override IXLRangeColumns Columns(Func<IXLRangeColumn, bool> predicate = null)
+        {
+            var columns = base.Columns(predicate);
+            columns.Cast<XLRangeColumn>().ForEach(column => column.Table = this);
+            return columns;
+        }
+
+        public override IXLRangeColumns Columns(string columns)
+        {
+            var cols = base.Columns(columns);
+            cols.Cast<XLRangeColumn>().ForEach(column => column.Table = this);
+            return cols;
+        }
+
+        public override IXLRangeColumns Columns(string firstColumn, string lastColumn)
+        {
+            var columns = base.Columns(firstColumn, lastColumn);
+            columns.Cast<XLRangeColumn>().ForEach(column => column.Table = this);
+            return columns;
+        }
+
+        internal override XLRangeColumns ColumnsUsed(XLCellsUsedOptions options, Func<IXLRangeColumn, bool> predicate = null)
+        {
+            var columns = base.ColumnsUsed(options, predicate);
+            columns.Cast<XLRangeColumn>().ForEach(column => column.Table = this);
+            return columns;
+        }
+
+        internal override XLRangeColumns ColumnsUsed(Func<IXLRangeColumn, bool> predicate = null)
+        {
+            var columns = base.ColumnsUsed(predicate);
+            columns.Cast<XLRangeColumn>().ForEach(column => column.Table = this);
+            return columns;
+        }
+
+        IXLPivotTable IXLRangeBase.CreatePivotTable(IXLCell targetCell, String name)
+        {
+            return CreatePivotTable(targetCell, name);
+        }
+
+        internal new XLPivotTable CreatePivotTable(IXLCell targetCell, String name)
+        {
+            return (XLPivotTable)targetCell.Worksheet.PivotTables.Add(name, targetCell, this);
+        }
+
+        public IEnumerable<dynamic> AsDynamicEnumerable()
+        {
+            foreach (var row in this.DataRange.Rows())
+            {
+                dynamic expando = new ExpandoObject();
+                foreach (var f in this.Fields)
+                {
+                    var value = row.Cell(f.Index + 1).Value;
+                    // ExpandoObject supports IDictionary so we can extend it like this
+                    var expandoDict = expando as IDictionary<string, object>;
+                    expandoDict[f.Name] = value;
+                }
+
+                yield return expando;
+            }
+        }
+
+        public DataTable AsNativeDataTable()
+        {
+            var table = new DataTable(this.Name);
+
+            foreach (var f in Fields.Cast<XLTableField>())
+            {
+                Type type = typeof(object);
+                if (f.IsConsistentDataType())
+                {
+                    var c = f.Column.Cells().Skip(this.ShowHeaderRow ? 1 : 0).First();
+                    switch (c.DataType)
+                    {
+                        case XLDataType.Text:
+                            type = typeof(String);
+                            break;
+
+                        case XLDataType.Boolean:
+                            type = typeof(Boolean);
+                            break;
+
+                        case XLDataType.DateTime:
+                            type = typeof(DateTime);
+                            break;
+
+                        case XLDataType.TimeSpan:
+                            type = typeof(TimeSpan);
+                            break;
+
+                        case XLDataType.Number:
+                            type = typeof(Double);
+                            break;
+                    }
+                }
+
+                table.Columns.Add(f.Name, type);
+            }
+
+            foreach (var row in this.DataRange.Rows())
+            {
+                var dr = table.NewRow();
+
+                foreach (var f in this.Fields)
+                {
+                    dr[f.Name] = row.Cell(f.Index + 1).Value;
+                }
+
+                table.Rows.Add(dr);
+            }
+
+            return table;
+        }
+
+        public IXLTable CopyTo(IXLWorksheet targetSheet)
+        {
+            return CopyTo((XLWorksheet)targetSheet);
+        }
+
+        internal IXLTable CopyTo(XLWorksheet targetSheet, bool copyData = true)
+        {
+            if (targetSheet == Worksheet)
+                throw new InvalidOperationException("Cannot copy table to the worksheet it already belongs to.");
+
+            var targetRange = targetSheet.Range(RangeAddress.WithoutWorksheet());
+            if (copyData)
+                RangeUsed().CopyTo(targetRange);
+            else
+                HeadersRow().CopyTo(targetRange.FirstRow());
+
+            String tableName = Name;
+            var newTable = (XLTable)targetSheet.Table(targetRange, tableName, true);
+
+            newTable.RelId = null;
+            newTable.EmphasizeFirstColumn = EmphasizeFirstColumn;
+            newTable.EmphasizeLastColumn = EmphasizeLastColumn;
+            newTable.ShowRowStripes = ShowRowStripes;
+            newTable.ShowColumnStripes = ShowColumnStripes;
+            newTable.ShowAutoFilter = ShowAutoFilter;
+            newTable.Theme = Theme;
+            newTable._showTotalsRow = ShowTotalsRow;
+
+            Int32 fieldCount = ColumnCount();
+            for (Int32 f = 0; f < fieldCount; f++)
+            {
+                var tableField = newTable.Field(f) as XLTableField;
+                var tField = Field(f) as XLTableField;
+                tableField.Index = tField.Index;
+                tableField.Name = tField.Name;
+                tableField.totalsRowLabel = tField.totalsRowLabel;
+                tableField.totalsRowFunction = tField.totalsRowFunction;
+            }
+            return newTable;
+        }
+
+        #region Append and replace data
+
+        public IXLRange AppendData(IEnumerable data, Boolean propagateExtraColumns = false)
+        {
+            return AppendData(data, transpose: false, propagateExtraColumns: propagateExtraColumns);
+        }
+
+        public IXLRange AppendData(IEnumerable data, bool transpose, Boolean propagateExtraColumns = false)
+        {
+            var castedData = data?.Cast<object>();
+            if (!(castedData?.Any() ?? false) || data is String)
+                return null;
+
+            var numberOfNewRows = castedData.Count();
+
+            var lastRowOfOldRange = this.DataRange.LastRow();
+            lastRowOfOldRange.InsertRowsBelow(numberOfNewRows);
+            this.Fields.Cast<XLTableField>().ForEach(f => f.Column = null);
+
+            var insertedRange = lastRowOfOldRange.RowBelow().FirstCell().InsertData(castedData, transpose);
+
+            PropagateExtraColumns(insertedRange.ColumnCount(), lastRowOfOldRange.RowNumber());
+
+            return insertedRange;
+        }
+
+        public IXLRange AppendData(DataTable dataTable, Boolean propagateExtraColumns = false)
+        {
+            return AppendData(dataTable.Rows.Cast<DataRow>(), propagateExtraColumns: propagateExtraColumns);
+        }
+
+        public IXLRange AppendData<T>(IEnumerable<T> data, Boolean propagateExtraColumns = false)
+        {
+            if (!(data?.Any() ?? false) || data is String)
+                return null;
+
+            var numberOfNewRows = data.Count();
+
+            if (numberOfNewRows == 0)
+                return null;
+
+            var lastRowOfOldRange = this.DataRange.LastRow();
+            lastRowOfOldRange.InsertRowsBelow(numberOfNewRows);
+            this.Fields.Cast<XLTableField>().ForEach(f => f.Column = null);
+
+            var insertedRange = lastRowOfOldRange.RowBelow().FirstCell().InsertData(data);
+
+            PropagateExtraColumns(insertedRange.ColumnCount(), lastRowOfOldRange.RowNumber());
+
+            return insertedRange;
+        }
+
+        public IXLRange ReplaceData(IEnumerable data, Boolean propagateExtraColumns = false)
+        {
+            return ReplaceData(data, transpose: false, propagateExtraColumns: propagateExtraColumns);
+        }
+
+        public IXLRange ReplaceData(IEnumerable data, bool transpose, Boolean propagateExtraColumns = false)
+        {
+            var castedData = data?.Cast<object>();
+            if (!(castedData?.Any() ?? false) || data is String)
+                throw new InvalidOperationException("Cannot replace table data with empty enumerable.");
+
+            var firstDataRowNumber = this.DataRange.FirstRow().RowNumber();
+            var lastDataRowNumber = this.DataRange.LastRow().RowNumber();
+
+            // Resize table
+            var sizeDifference = castedData.Count() - this.DataRange.RowCount();
+            if (sizeDifference > 0)
+                this.DataRange.LastRow().InsertRowsBelow(sizeDifference);
+            else if (sizeDifference < 0)
+            {
+                this.DataRange.Rows
+                (
+                    lastDataRowNumber + sizeDifference + 1 - firstDataRowNumber + 1,
+                    lastDataRowNumber - firstDataRowNumber + 1
+                )
+                .Delete();
+
+                // No propagation needed when reducing the number of rows
+                propagateExtraColumns = false;
+            }
+
+            if (sizeDifference != 0)
+                // Invalidate table fields' columns
+                this.Fields.Cast<XLTableField>().ForEach(f => f.Column = null);
+
+            var replacedRange = this.DataRange.FirstCell().InsertData(castedData, transpose);
+
+            if (propagateExtraColumns)
+                PropagateExtraColumns(replacedRange.ColumnCount(), lastDataRowNumber);
+
+            return replacedRange;
+        }
+
+        public IXLRange ReplaceData(DataTable dataTable, Boolean propagateExtraColumns = false)
+        {
+            return ReplaceData(dataTable.Rows.Cast<DataRow>(), propagateExtraColumns: propagateExtraColumns);
+        }
+
+        public IXLRange ReplaceData<T>(IEnumerable<T> data, Boolean propagateExtraColumns = false)
+        {
+            if (!(data?.Any() ?? false) || data is String)
+                throw new InvalidOperationException("Cannot replace table data with empty enumerable.");
+
+            var firstDataRowNumber = this.DataRange.FirstRow().RowNumber();
+            var lastDataRowNumber = this.DataRange.LastRow().RowNumber();
+
+            // Resize table
+            var sizeDifference = data.Count() - this.DataRange.RowCount();
+            if (sizeDifference > 0)
+                this.DataRange.LastRow().InsertRowsBelow(sizeDifference);
+            else if (sizeDifference < 0)
+            {
+                this.DataRange.Rows
+                (
+                    lastDataRowNumber + sizeDifference + 1 - firstDataRowNumber + 1,
+                    lastDataRowNumber - firstDataRowNumber + 1
+                )
+                .Delete();
+
+                // No propagation needed when reducing the number of rows
+                propagateExtraColumns = false;
+            }
+
+            if (sizeDifference != 0)
+                // Invalidate table fields' columns
+                this.Fields.Cast<XLTableField>().ForEach(f => f.Column = null);
+
+            var replacedRange = this.DataRange.FirstCell().InsertData(data);
+
+            if (propagateExtraColumns)
+                PropagateExtraColumns(replacedRange.ColumnCount(), lastDataRowNumber);
+
+            return replacedRange;
+        }
+
+        private void PropagateExtraColumns(int numberOfNonExtraColumns, int previousLastDataRow)
+        {
+            for (var i = numberOfNonExtraColumns; i < this.Fields.Count(); i++)
+            {
+                var field = this.Field(i);
+
+                var cell = this.Worksheet.Cell(previousLastDataRow, field.Column.ColumnNumber());
+                field.Column.Cells(c => c.Address.RowNumber > previousLastDataRow)
+                    .ForEach(c =>
+                    {
+                        if (cell.HasFormula)
+                            c.FormulaR1C1 = cell.FormulaR1C1;
+                        else
+                            c.Value = cell.Value;
+                    });
+            }
+        }
+
+        #endregion Append and replace data
     }
 }

@@ -1,46 +1,46 @@
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Xml;
 
 namespace ClosedXML.Utils
 {
     public static class XmlEncoder
     {
-        /// <summary>
-        /// Checks if a character is not allowed to the XML Spec http://www.w3.org/TR/REC-xml/#charsets
-        /// </summary>
-        /// <param name="ch">Input Character</param>
-        /// <returns>Returns false if the character is invalid according to the XML specification, and will not be
-        /// escaped by an XmlWriter.</returns>
-        public static bool IsXmlChar(char ch)
-        {
-            return (((ch >= 0x0020 && ch <= 0xD7FF) ||
-                      (ch >= 0xE000 && ch <= 0xFFFD) ||
-                      ch == 0x0009 || ch == 0x000A ||
-                      ch == 0x000D));
-        }
+        private static readonly Regex xHHHHRegex = new Regex("_(x[\\dA-Fa-f]{4})_", RegexOptions.Compiled);
+        private static readonly Regex Uppercase_X_HHHHRegex = new Regex("_(X[\\dA-Fa-f]{4})_", RegexOptions.Compiled);
 
         public static string EncodeString(string encodeStr)
         {
             if (encodeStr == null) return null;
 
-            var newString = new StringBuilder();
+            encodeStr = xHHHHRegex.Replace(encodeStr, "_x005F_$1_");
+
+            var sb = new StringBuilder(encodeStr.Length);
 
             foreach (var ch in encodeStr)
             {
-                if (IsXmlChar(ch)) //this method is new in .NET 4
+                if (XmlConvert.IsXmlChar(ch))
                 {
-                    newString.Append(ch);
+                    sb.Append(ch);
                 }
                 else
                 {
-                    newString.Append(XmlConvert.EncodeName(ch.ToString()));
+                    sb.Append(XmlConvert.EncodeName(ch.ToString()));
                 }
             }
-            return newString.ToString();
+
+            return sb.ToString();
         }
 
         public static string DecodeString(string decodeStr)
         {
+            if (string.IsNullOrEmpty(decodeStr)) return string.Empty;
+
+            // Strings "escaped" with _X (capital X) should not be treated as escaped
+            // Example: _Xceed_Something
+            // https://github.com/ClosedXML/ClosedXML/issues/1154
+            decodeStr = Uppercase_X_HHHHRegex.Replace(decodeStr, "_x005F_$1_");
+
             return XmlConvert.DecodeName(decodeStr);
         }
     }

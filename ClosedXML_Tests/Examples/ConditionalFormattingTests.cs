@@ -37,6 +37,12 @@ namespace ClosedXML_Tests.Examples
         }
 
         [Test]
+        public void CFDataBarNegative()
+        {
+            TestHelper.RunTestExample<CFDataBarNegative>(@"ConditionalFormatting\CFDataBarNegative.xlsx");
+        }
+
+        [Test]
         public void CFEndsWith()
         {
             TestHelper.RunTestExample<CFEndsWith>(@"ConditionalFormatting\CFEndsWith.xlsx");
@@ -112,6 +118,24 @@ namespace ClosedXML_Tests.Examples
         public void CFMultipleConditions()
         {
             TestHelper.RunTestExample<CFMultipleConditions>(@"ConditionalFormatting\CFMultipleConditions.xlsx");
+        }
+
+        [Test]
+        public void CFStopIfTrue()
+        {
+            TestHelper.RunTestExample<CFStopIfTrue>(@"ConditionalFormatting\CFStopIfTrue.xlsx");
+        }
+
+        [Test]
+        public void CFDatesOccurring()
+        {
+            TestHelper.RunTestExample<CFDatesOccurring>(@"ConditionalFormatting\CFDatesOccurring.xlsx");
+        }
+
+        [Test]
+        public void CFDataBars()
+        {
+            TestHelper.RunTestExample<CFDataBars>(@"ConditionalFormatting\CFDataBars.xlsx");
         }
     }
 }

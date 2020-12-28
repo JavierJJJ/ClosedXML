@@ -43,7 +43,13 @@ namespace ClosedXML.Excel
             if (!IsAllowedAnchor(anchor))
                 return null;
 
-            return anchor
+            // Maybe we should not restrict here, and just search for all NonVisualDrawingProperties in an anchor?
+            var shape = anchor.Descendants<Xdr.Picture>().Cast<OpenXmlCompositeElement>().FirstOrDefault()
+                        ?? anchor.Descendants<Xdr.ConnectionShape>().Cast<OpenXmlCompositeElement>().FirstOrDefault();
+
+            if (shape == null) return null;
+
+            return shape
                 .Descendants<Xdr.NonVisualDrawingProperties>()
                 .FirstOrDefault();
         }

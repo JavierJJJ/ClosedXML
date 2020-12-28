@@ -1,4 +1,5 @@
 using ClosedXML.Excel;
+using ClosedXML.Excel.CalcEngine.Exceptions;
 using NUnit.Framework;
 using System;
 using System.Linq;
@@ -111,7 +112,7 @@ namespace ClosedXML_Tests.Excel
             {
                 var ws = wb.AddWorksheet("Sheet1");
                 ws.Cell("A1").Value = new DateTime(2016, 1, 1);
-                ws.Cell("A1").DataType = XLCellValues.DateTime;
+                ws.Cell("A1").DataType = XLDataType.DateTime;
 
                 ws.Cell("A2").FormulaA1 = @"=IF(A1 = """", ""A"", ""B"")";
                 var actual = ws.Cell("A2").Value;
@@ -154,6 +155,73 @@ namespace ClosedXML_Tests.Excel
 
                 var actual = ws.FirstCell().CellRight().Value;
                 Assert.AreEqual(6, actual);
+            }
+        }
+
+        [Test]
+        public void FormulaThatStartsWithEqualsAndPlus()
+        {
+            object actual;
+            actual = XLWorkbook.EvaluateExpr("=MID(\"This is a test\", 6, 2)");
+            Assert.AreEqual("is", actual);
+
+            actual = XLWorkbook.EvaluateExpr("=+MID(\"This is a test\", 6, 2)");
+            Assert.AreEqual("is", actual);
+
+            actual = XLWorkbook.EvaluateExpr("=+++++MID(\"This is a test\", 6, 2)");
+            Assert.AreEqual("is", actual);
+
+            actual = XLWorkbook.EvaluateExpr("+MID(\"This is a test\", 6, 2)");
+            Assert.AreEqual("is", actual);
+        }
+
+        [Test]
+        public void FormulasWithErrors()
+        {
+            Assert.Throws<CellReferenceException>(() => XLWorkbook.EvaluateExpr("YEAR(#REF!)"));
+            Assert.Throws<CellValueException>(() => XLWorkbook.EvaluateExpr("YEAR(#VALUE!)"));
+            Assert.Throws<DivisionByZeroException>(() => XLWorkbook.EvaluateExpr("YEAR(#DIV/0!)"));
+            Assert.Throws<NameNotRecognizedException>(() => XLWorkbook.EvaluateExpr("YEAR(#NAME?)"));
+            Assert.Throws<NoValueAvailableException>(() => XLWorkbook.EvaluateExpr("YEAR(#N/A)"));
+            Assert.Throws<NullValueException>(() => XLWorkbook.EvaluateExpr("YEAR(#NULL!)"));
+            Assert.Throws<NumberException>(() => XLWorkbook.EvaluateExpr("YEAR(#NUM!)"));
+        }
+
+        [Test]
+        public void UnicodeLetterParsing()
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws1 = wb.AddWorksheet("Sheet C CÄ");
+                var ws2 = wb.AddWorksheet("ÖC");
+                var ws3 = wb.AddWorksheet("Sheet3");
+
+                ws1.FirstCell().SetValue(100);
+                ws2.FirstCell().SetValue(50);
+
+                ws3.FirstCell().FormulaA1 = "='Sheet C CÄ'!A1";
+                ws3.FirstCell().CellBelow().FormulaA1 = "ÖC!A1";
+
+                Assert.AreEqual(100, ws3.FirstCell().Value);
+                Assert.AreEqual(50, ws3.FirstCell().CellBelow().Value);
+            }
+        }
+
+        [Test]
+        public void ShiftFormula()
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.AddWorksheet();
+                ws.Cell("B1").FormulaA1 = "ATAN2(C1,C2)";
+                ws.Cell("B2").FormulaA1 = "DEC2HEX(C2)";
+                ws.Range("B3:B5").FormulaA1 = "{DAYS360(C3:C5, D3:D5)}";
+
+                ws.Column(1).Delete();
+
+                Assert.AreEqual("ATAN2(B1,B2)", ws.Cell("A1").FormulaA1);
+                Assert.AreEqual("DEC2HEX(B2)", ws.Cell("A2").FormulaA1);
+                Assert.AreEqual("{DAYS360(B3:B5, C3:C5)}", ws.Cell("A3").FormulaA1);
             }
         }
     }

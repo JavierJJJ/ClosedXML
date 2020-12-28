@@ -7,7 +7,7 @@ namespace ClosedXML.Excel
 {
     public enum XLWorksheetVisibility { Visible, Hidden, VeryHidden }
 
-    public interface IXLWorksheet : IXLRangeBase
+    public interface IXLWorksheet : IXLRangeBase, IXLProtectable<IXLSheetProtection, XLSheetProtectionElements>
     {
         /// <summary>
         /// Gets the workbook that contains this worksheet
@@ -60,7 +60,10 @@ namespace ClosedXML.Excel
         /// Gets the first row of the worksheet that contains a cell with a value.
         /// </summary>
         /// <param name="includeFormats">If set to <c>true</c> formatted empty cells will count as used.</param>
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLRow FirstRowUsed(Boolean includeFormats);
+
+        IXLRow FirstRowUsed(XLCellsUsedOptions options);
 
         /// <summary>
         /// Gets the last row of the worksheet.
@@ -76,7 +79,10 @@ namespace ClosedXML.Excel
         /// Gets the last row of the worksheet that contains a cell with a value.
         /// </summary>
         /// <param name="includeFormats">If set to <c>true</c> formatted empty cells will count as used.</param>
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLRow LastRowUsed(Boolean includeFormats);
+
+        IXLRow LastRowUsed(XLCellsUsedOptions options);
 
         /// <summary>
         /// Gets the first column of the worksheet.
@@ -92,7 +98,10 @@ namespace ClosedXML.Excel
         /// Gets the first column of the worksheet that contains a cell with a value.
         /// </summary>
         /// <param name="includeFormats">If set to <c>true</c> formatted empty cells will count as used.</param>
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLColumn FirstColumnUsed(Boolean includeFormats);
+
+        IXLColumn FirstColumnUsed(XLCellsUsedOptions options);
 
         /// <summary>
         /// Gets the last column of the worksheet.
@@ -108,7 +117,10 @@ namespace ClosedXML.Excel
         /// Gets the last column of the worksheet that contains a cell with a value.
         /// </summary>
         /// <param name="includeFormats">If set to <c>true</c> formatted empty cells will count as used.</param>
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLColumn LastColumnUsed(Boolean includeFormats);
+
+        IXLColumn LastColumnUsed(XLCellsUsedOptions options);
 
         /// <summary>
         /// Gets a collection of all columns in this worksheet.
@@ -338,7 +350,10 @@ namespace ClosedXML.Excel
 
         IXLRange RangeUsed();
 
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLRange RangeUsed(bool includeFormats);
+
+        IXLRange RangeUsed(XLCellsUsedOptions options);
 
         IXLDataValidations DataValidations { get; }
 
@@ -348,17 +363,8 @@ namespace ClosedXML.Excel
 
         IXLWorksheet Unhide();
 
-        IXLSheetProtection Protection { get; }
-
-        IXLSheetProtection Protect();
-
-        IXLSheetProtection Protect(String password);
-
-        IXLSheetProtection Unprotect();
-
-        IXLSheetProtection Unprotect(String password);
-
         IXLSortElements SortRows { get; }
+
         IXLSortElements SortColumns { get; }
 
         IXLRange Sort();
@@ -372,11 +378,17 @@ namespace ClosedXML.Excel
         //IXLCharts Charts { get; }
 
         Boolean ShowFormulas { get; set; }
+
         Boolean ShowGridLines { get; set; }
+
         Boolean ShowOutlineSymbols { get; set; }
+
         Boolean ShowRowColHeaders { get; set; }
+
         Boolean ShowRuler { get; set; }
+
         Boolean ShowWhiteSpace { get; set; }
+
         Boolean ShowZeros { get; set; }
 
         IXLWorksheet SetShowFormulas(); IXLWorksheet SetShowFormulas(Boolean value);
@@ -398,6 +410,7 @@ namespace ClosedXML.Excel
         IXLWorksheet SetTabColor(XLColor color);
 
         Boolean TabSelected { get; set; }
+
         Boolean TabActive { get; set; }
 
         IXLWorksheet SetTabSelected(); IXLWorksheet SetTabSelected(Boolean value);
@@ -412,23 +425,38 @@ namespace ClosedXML.Excel
 
         IXLWorksheet SetRightToLeft(); IXLWorksheet SetRightToLeft(Boolean value);
 
-        IXLBaseAutoFilter AutoFilter { get; }
+        IXLAutoFilter AutoFilter { get; }
 
-        IXLRows RowsUsed(Boolean includeFormats = false, Func<IXLRow, Boolean> predicate = null);
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
+        IXLRows RowsUsed(Boolean includeFormats, Func<IXLRow, Boolean> predicate = null);
+
+        IXLRows RowsUsed(XLCellsUsedOptions options = XLCellsUsedOptions.AllContents, Func<IXLRow, Boolean> predicate = null);
 
         IXLRows RowsUsed(Func<IXLRow, Boolean> predicate);
 
-        IXLColumns ColumnsUsed(Boolean includeFormats = false, Func<IXLColumn, Boolean> predicate = null);
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
+        IXLColumns ColumnsUsed(Boolean includeFormats, Func<IXLColumn, Boolean> predicate = null);
+
+        IXLColumns ColumnsUsed(XLCellsUsedOptions options = XLCellsUsedOptions.AllContents, Func<IXLColumn, Boolean> predicate = null);
 
         IXLColumns ColumnsUsed(Func<IXLColumn, Boolean> predicate);
 
         IXLRanges MergedRanges { get; }
+
         IXLConditionalFormats ConditionalFormats { get; }
 
+        IXLSparklineGroups SparklineGroups { get; }
+
         IXLRanges SelectedRanges { get; }
+
         IXLCell ActiveCell { get; set; }
 
         Object Evaluate(String expression);
+
+        /// <summary>
+        /// Force recalculation of all cell formulas.
+        /// </summary>
+        void RecalculateAllFormulas();
 
         String Author { get; set; }
 

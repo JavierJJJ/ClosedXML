@@ -50,7 +50,7 @@ namespace ClosedXML.Excel
         }
 
         private Dictionary<XLHFOccurrence, String> innerTexts = new Dictionary<XLHFOccurrence, String>();
-        internal String SetInnerText(XLHFOccurrence occurrence, String text)
+        internal void SetInnerText(XLHFOccurrence occurrence, String text)
         {
             var parsedElements = ParseFormattedHeaderFooterText(text);
 
@@ -63,13 +63,7 @@ namespace ClosedXML.Excel
             if (parsedElements.Any(e => e.Position == 'R'))
                 this.Right.AddText(string.Join("\r\n", parsedElements.Where(e => e.Position == 'R').Select(e => e.Text).ToArray()), occurrence);
 
-
-            if (innerTexts.ContainsKey(occurrence))
-                innerTexts[occurrence] = text;
-            else
-                innerTexts.Add(occurrence, text);
-
-            return innerTexts[occurrence];
+            innerTexts[occurrence] = text;
         }
 
         private struct ParsedHeaderFooterElement
@@ -80,13 +74,15 @@ namespace ClosedXML.Excel
 
         private static IEnumerable<ParsedHeaderFooterElement> ParseFormattedHeaderFooterText(string text)
         {
+            Func<int, bool> IsAtPositionIndicator = i => i < text.Length - 1 && text[i] == '&' && (new char[] { 'L', 'C', 'R' }.Contains(text[i + 1]));
+
             var parsedElements = new List<ParsedHeaderFooterElement>();
             var currentPosition = 'L'; // default is LEFT
             var hfElement = "";
 
             for (int i = 0; i < text.Length; i++)
             {
-                if (i < text.Length - 1 && text[i] == '&' && (new char[] { 'L', 'C', 'R' }.Contains(text[i + 1])))
+                if (IsAtPositionIndicator(i))
                 {
                     if ("" != hfElement) parsedElements.Add(new ParsedHeaderFooterElement()
                     {
@@ -99,7 +95,13 @@ namespace ClosedXML.Excel
                     hfElement = "";
                 }
 
-                hfElement += text[i];
+                if (i < text.Length)
+                {
+                    if (IsAtPositionIndicator(i))
+                        i--;
+                    else
+                        hfElement += text[i];
+                }
             }
 
             if ("" != hfElement)

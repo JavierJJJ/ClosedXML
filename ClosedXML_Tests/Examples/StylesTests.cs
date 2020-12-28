@@ -49,6 +49,12 @@ namespace ClosedXML_Tests.Examples
         }
 
         [Test]
+        public void StyleIncludeQuotePrefix()
+        {
+            TestHelper.RunTestExample<StyleIncludeQuotePrefix>(@"Styles\StyleIncludeQuotePrefix.xlsx");
+        }
+
+        [Test]
         public void StyleRowsColumns()
         {
             TestHelper.RunTestExample<StyleRowsColumns>(@"Styles\StyleRowsColumns.xlsx");
@@ -64,6 +70,12 @@ namespace ClosedXML_Tests.Examples
         public void UsingColors()
         {
             TestHelper.RunTestExample<UsingColors>(@"Styles\UsingColors.xlsx");
+        }
+
+        [Test]
+        public void UsingPhonetics()
+        {
+            TestHelper.RunTestExample<UsingPhonetics>(@"Styles\UsingPhonetics.xlsx");
         }
 
         [Test]

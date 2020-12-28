@@ -1,4 +1,7 @@
+// Keep this file CodeMaid organised and cleaned
 using ClosedXML.Excel;
+using ClosedXML.Excel.CalcEngine;
+using ClosedXML.Excel.CalcEngine.Exceptions;
 using NUnit.Framework;
 using System;
 using System.Linq;
@@ -22,7 +25,7 @@ namespace ClosedXML_Tests.Excel.CalcEngine
             value = ws.Evaluate("AVERAGE(G3:G45)").CastTo<double>();
             Assert.AreEqual(49.3255814, value, tolerance);
 
-            Assert.That(() => ws.Evaluate("AVERAGE(D3:D45)"), Throws.Exception);
+            Assert.That(() => ws.Evaluate("AVERAGE(D3:D45)"), Throws.TypeOf<ApplicationException>());
         }
 
         [Test]
@@ -72,8 +75,15 @@ namespace ClosedXML_Tests.Excel.CalcEngine
             value = ws.Evaluate(@"=COUNTBLANK(D43:D49)").CastTo<int>();
             Assert.AreEqual(4, value);
 
-            value = workbook.Evaluate(@"=COUNTBLANK(E3:E45)").CastTo<int>();
+            value = ws.Evaluate(@"=COUNTBLANK(E3:E45)").CastTo<int>();
             Assert.AreEqual(0, value);
+
+            value = ws.Evaluate(@"=COUNTBLANK(A1)").CastTo<int>();
+            Assert.AreEqual(1, value);
+
+            Assert.Throws<NoValueAvailableException>(() => workbook.Evaluate(@"=COUNTBLANK(E3:E45)"));
+            Assert.Throws<ExpressionParseException>(() => ws.Evaluate(@"=COUNTBLANK()"));
+            Assert.Throws<ExpressionParseException>(() => ws.Evaluate(@"=COUNTBLANK(A3:A45,E3:E45)"));
         }
 
         [Test]
@@ -91,13 +101,140 @@ namespace ClosedXML_Tests.Excel.CalcEngine
             Assert.AreEqual(24, value);
         }
 
+        [TestCase(@"=COUNTIF(Data!E:E, ""J*"")", 13)]
+        [TestCase(@"=COUNTIF(Data!E:E, ""*i*"")", 21)]
+        [TestCase(@"=COUNTIF(Data!E:E, ""*in*"")", 9)]
+        [TestCase(@"=COUNTIF(Data!E:E, ""*i*l"")", 9)]
+        [TestCase(@"=COUNTIF(Data!E:E, ""*i?e*"")", 9)]
+        [TestCase(@"=COUNTIF(Data!E:E, ""*o??s*"")", 10)]
+        [TestCase(@"=COUNTIF(Data!X1:X1000, """")", 1000)]
+        [TestCase(@"=COUNTIF(Data!E1:E44, """")", 1)]
+        public void CountIf_ConditionWithWildcards(string formula, int expectedResult)
+        {
+            var ws = workbook.Worksheets.First();
+
+            int value = ws.Evaluate(formula).CastTo<int>();
+            Assert.AreEqual(expectedResult, value);
+        }
+
+        [TestCase(@"=COUNTIF(A1:A10, 1)", 1)]
+        [TestCase(@"=COUNTIF(A1:A10, 2.0)", 1)]
+        [TestCase(@"=COUNTIF(A1:A10, ""3"")", 2)]
+        [TestCase(@"=COUNTIF(A1:A10, 3)", 2)]
+        [TestCase(@"=COUNTIF(A1:A10, 43831)", 1)]
+        [TestCase(@"=COUNTIF(A1:A10, DATE(2020, 1, 1))", 1)]
+        [TestCase(@"=COUNTIF(A1:A10, TRUE)", 1)]
+        public void CountIf_MixedData(string formula, int expected)
+        {
+            // We follow to Excel's convention.
+            // Excel treats 1 and TRUE as unequal, but 3 and "3" as equal
+            // LibreOffice Calc handles some SUMIF and COUNTIF differently, e.g. it treats 1 and TRUE as equal, but 3 and "3" differently
+            var ws = workbook.Worksheet("MixedData");
+            Assert.AreEqual(expected, ws.Evaluate(formula));
+        }
+
+        [TestCase("x", @"=COUNTIF(A1:A1, ""?"")", 1)]
+        [TestCase("x", @"=COUNTIF(A1:A1, ""~?"")", 0)]
+        [TestCase("?", @"=COUNTIF(A1:A1, ""~?"")", 1)]
+        [TestCase("~?", @"=COUNTIF(A1:A1, ""~?"")", 0)]
+        [TestCase("~?", @"=COUNTIF(A1:A1, ""~~~?"")", 1)]
+        [TestCase("?", @"=COUNTIF(A1:A1, ""~~?"")", 0)]
+        [TestCase("~?", @"=COUNTIF(A1:A1, ""~~?"")", 1)]
+        [TestCase("~x", @"=COUNTIF(A1:A1, ""~~?"")", 1)]
+        [TestCase("*", @"=COUNTIF(A1:A1, ""~*"")", 1)]
+        [TestCase("~*", @"=COUNTIF(A1:A1, ""~*"")", 0)]
+        [TestCase("~*", @"=COUNTIF(A1:A1, ""~~~*"")", 1)]
+        [TestCase("*", @"=COUNTIF(A1:A1, ""~~*"")", 0)]
+        [TestCase("~*", @"=COUNTIF(A1:A1, ""~~*"")", 1)]
+        [TestCase("~x", @"=COUNTIF(A1:A1, ""~~*"")", 1)]
+        [TestCase("~xyz", @"=COUNTIF(A1:A1, ""~~*"")", 1)]
+        public void CountIf_MoreWildcards(string cellContent, string formula, int expectedResult)
+        {
+            using (var wb = new XLWorkbook())
+            {
+                var ws = wb.AddWorksheet("Sheet1");
+
+                ws.Cell(1, 1).Value = cellContent;
+
+                Assert.AreEqual(expectedResult, (double)ws.Evaluate(formula));
+            }
+        }
+
+        [TestCase("=COUNTIFS(B1:D1, \"=Yes\")", 1)]
+        [TestCase("=COUNTIFS(B1:B4, \"=Yes\", C1:C4, \"=Yes\")", 2)]
+        [TestCase("= COUNTIFS(B4:D4, \"=Yes\", B2:D2, \"=Yes\")", 1)]
+        public void CountIfs_ReferenceExample1FromExcelDocumentations(
+            string formula,
+            int expectedOutcome)
+        {
+            using (var wb = new XLWorkbook())
+            {
+                wb.ReferenceStyle = XLReferenceStyle.A1;
+
+                var ws = wb.AddWorksheet("Sheet1");
+
+                ws.Cell(1, 1).Value = "Davidoski";
+                ws.Cell(1, 2).Value = "Yes";
+                ws.Cell(1, 3).Value = "No";
+                ws.Cell(1, 4).Value = "No";
+
+                ws.Cell(2, 1).Value = "Burke";
+                ws.Cell(2, 2).Value = "Yes";
+                ws.Cell(2, 3).Value = "Yes";
+                ws.Cell(2, 4).Value = "No";
+
+                ws.Cell(3, 1).Value = "Sundaram";
+                ws.Cell(3, 2).Value = "Yes";
+                ws.Cell(3, 3).Value = "Yes";
+                ws.Cell(3, 4).Value = "Yes";
+
+                ws.Cell(4, 1).Value = "Levitan";
+                ws.Cell(4, 2).Value = "No";
+                ws.Cell(4, 3).Value = "Yes";
+                ws.Cell(4, 4).Value = "Yes";
+
+                Assert.AreEqual(expectedOutcome, ws.Evaluate(formula));
+            }
+        }
+
+        [Test]
+        public void CountIfs_SingleCondition()
+        {
+            var ws = workbook.Worksheets.First();
+            int value;
+            value = ws.Evaluate(@"=COUNTIFS(D3:D45,""Central"")").CastTo<int>();
+            Assert.AreEqual(24, value);
+
+            value = ws.Evaluate(@"=COUNTIFS(D:D,""Central"")").CastTo<int>();
+            Assert.AreEqual(24, value);
+
+            value = workbook.Evaluate(@"=COUNTIFS(Data!D:D,""Central"")").CastTo<int>();
+            Assert.AreEqual(24, value);
+        }
+
+        [TestCase(@"=COUNTIFS(Data!E:E, ""J*"")", 13)]
+        [TestCase(@"=COUNTIFS(Data!E:E, ""*i*"")", 21)]
+        [TestCase(@"=COUNTIFS(Data!E:E, ""*in*"")", 9)]
+        [TestCase(@"=COUNTIFS(Data!E:E, ""*i*l"")", 9)]
+        [TestCase(@"=COUNTIFS(Data!E:E, ""*i?e*"")", 9)]
+        [TestCase(@"=COUNTIFS(Data!E:E, ""*o??s*"")", 10)]
+        [TestCase(@"=COUNTIFS(Data!X1:X1000, """")", 1000)]
+        [TestCase(@"=COUNTIFS(Data!E1:E44, """")", 1)]
+        public void CountIfs_SingleConditionWithWildcards(string formula, int expectedResult)
+        {
+            var ws = workbook.Worksheets.First();
+
+            int value = ws.Evaluate(formula).CastTo<int>();
+            Assert.AreEqual(expectedResult, value);
+        }
+
         [OneTimeTearDown]
         public void Dispose()
         {
             workbook.Dispose();
         }
 
-        [OneTimeSetUp]
+        [SetUp]
         public void Init()
         {
             // Make sure tests run on a deterministic culture
@@ -146,7 +283,7 @@ namespace ClosedXML_Tests.Excel.CalcEngine
         {
             var ws = workbook.Worksheets.First();
             double value;
-            Assert.That(() => ws.Evaluate(@"=STDEV(D3:D45)"), Throws.Exception);
+            Assert.That(() => ws.Evaluate(@"=STDEV(D3:D45)"), Throws.TypeOf<ApplicationException>());
 
             value = ws.Evaluate(@"=STDEV(H3:H45)").CastTo<double>();
             Assert.AreEqual(47.34511769, value, tolerance);
@@ -163,7 +300,7 @@ namespace ClosedXML_Tests.Excel.CalcEngine
         {
             var ws = workbook.Worksheets.First();
             double value;
-            Assert.That(() => ws.Evaluate(@"=STDEVP(D3:D45)"), Throws.Exception);
+            Assert.That(() => ws.Evaluate(@"=STDEVP(D3:D45)"), Throws.InvalidOperationException);
 
             value = ws.Evaluate(@"=STDEVP(H3:H45)").CastTo<double>();
             Assert.AreEqual(46.79135458, value, tolerance);
@@ -175,12 +312,58 @@ namespace ClosedXML_Tests.Excel.CalcEngine
             Assert.AreEqual(46.79135458, value, tolerance);
         }
 
+        [TestCase(@"=SUMIF(A1:A10, 1, A1:A10)", 1)]
+        [TestCase(@"=SUMIF(A1:A10, 2.0, A1:A10)", 2)]
+        [TestCase(@"=SUMIF(A1:A10, 3, A1:A10)", 3)]
+        [TestCase(@"=SUMIF(A1:A10, ""3"", A1:A10)", 3)]
+        [TestCase(@"=SUMIF(A1:A10, 43831, A1:A10)", 43831)]
+        [TestCase(@"=SUMIF(A1:A10, DATE(2020, 1, 1), A1:A10)", 43831)]
+        [TestCase(@"=SUMIF(A1:A10, TRUE, A1:A10)", 0)]
+        public void SumIf_MixedData(string formula, double expected)
+        {
+            // We follow to Excel's convention.
+            // Excel treats 1 and TRUE as unequal, but 3 and "3" as equal
+            // LibreOffice Calc handles some SUMIF and COUNTIF differently, e.g. it treats 1 and TRUE as equal, but 3 and "3" differently
+            var ws = workbook.Worksheet("MixedData");
+            Assert.AreEqual(expected, ws.Evaluate(formula));
+        }
+
+        [Test]
+        [TestCase("COUNT(G:I,G:G,H:I)", 258d, Description = "COUNT overlapping columns")]
+        [TestCase("COUNT(6:8,6:6,7:8)", 30d, Description = "COUNT overlapping rows")]
+        [TestCase("COUNTBLANK(H:J)", 3145640d, Description = "COUNTBLANK columns")]
+        [TestCase("COUNTBLANK(7:9)", 49128d, Description = "COUNTBLANK rows")]
+        [TestCase("COUNT(1:1048576)", 216d, Description = "COUNT worksheet")]
+        [TestCase("COUNTBLANK(1:1048576)", 17179868831d, Description = "COUNTBLANK worksheet")]
+        [TestCase("SUM(H:J)", 20501.15d, Description = "SUM columns")]
+        [TestCase("SUM(4:5)", 85366.12d, Description = "SUM rows")]
+        [TestCase("SUMIF(G:G,50,H:H)", 24.98d, Description = "SUMIF columns")]
+        [TestCase("SUMIF(G23:G52,\"\",H3:H32)", 53.24d, Description = "SUMIF ranges")]
+        [TestCase("SUMIFS(H:H,G:G,50,I:I,\">900\")", 19.99d, Description = "SUMIFS columns")]
+        public void TallySkipsEmptyCells(string formulaA1, double expectedResult)
+        {
+            using (var wb = SetupWorkbook())
+            {
+                var ws = wb.Worksheets.First();
+                //Let's pre-initialize cells we need so they didn't affect the result
+                ws.Range("A1:J45").Style.Fill.BackgroundColor = XLColor.Amber;
+                ws.Cell("ZZ1000").Value = 1;
+                int initialCount = (ws as XLWorksheet).Internals.CellsCollection.Count;
+
+                var actualResult = (double)ws.Evaluate(formulaA1);
+                int cellsCount = (ws as XLWorksheet).Internals.CellsCollection.Count;
+
+                Assert.AreEqual(expectedResult, actualResult, tolerance);
+                Assert.AreEqual(initialCount, cellsCount);
+            }
+        }
+
         [Test]
         public void Var()
         {
             var ws = workbook.Worksheets.First();
             double value;
-            Assert.That(() => ws.Evaluate(@"=VAR(D3:D45)"), Throws.Exception);
+            Assert.That(() => ws.Evaluate(@"=VAR(D3:D45)"), Throws.InvalidOperationException);
 
             value = ws.Evaluate(@"=VAR(H3:H45)").CastTo<double>();
             Assert.AreEqual(2241.560169, value, tolerance);
@@ -197,7 +380,7 @@ namespace ClosedXML_Tests.Excel.CalcEngine
         {
             var ws = workbook.Worksheets.First();
             double value;
-            Assert.That(() => ws.Evaluate(@"=VARP(D3:D45)"), Throws.Exception);
+            Assert.That(() => ws.Evaluate(@"=VARP(D3:D45)"), Throws.InvalidOperationException);
 
             value = ws.Evaluate(@"=VARP(H3:H45)").CastTo<double>();
             Assert.AreEqual(2189.430863, value, tolerance);
@@ -212,7 +395,7 @@ namespace ClosedXML_Tests.Excel.CalcEngine
         private XLWorkbook SetupWorkbook()
         {
             var wb = new XLWorkbook();
-            var ws = wb.AddWorksheet("Data");
+            var ws1 = wb.AddWorksheet("Data");
             var data = new object[]
             {
                 new {Id=1, OrderDate = DateTime.Parse("2015-01-06"), Region = "East", Rep = "Jones", Item = "Pencil", Units = 95, UnitCost = 1.99, Total = 189.05 },
@@ -259,10 +442,14 @@ namespace ClosedXML_Tests.Excel.CalcEngine
                 new {Id=42, OrderDate = DateTime.Parse("2016-12-04"), Region = "Central", Rep = "Jardine", Item = "Binder", Units = 94, UnitCost = 19.99, Total = 1879.06},
                 new {Id=43, OrderDate = DateTime.Parse("2016-12-21"), Region = "Central", Rep = "Andrews", Item = "Binder", Units = 28, UnitCost = 4.99, Total = 139.72}
             };
-            ws.FirstCell()
+
+            ws1.FirstCell()
                 .CellBelow()
                 .CellRight()
                 .InsertTable(data, "Table1");
+
+            var ws2 = wb.AddWorksheet("MixedData");
+            ws2.FirstCell().InsertData(new object[] { 1, 2.0, "3", 3, new DateTime(2020, 1, 1), true, new TimeSpan(10, 5, 30, 10) });
 
             return wb;
         }

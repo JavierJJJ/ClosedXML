@@ -51,7 +51,7 @@ namespace ClosedXML_Tests
                 throw new ArgumentException("Can't write to stream", "pStream");
             }
 
-            #endregion
+            #endregion Check params
 
             foreach (byte b in pBynaryArray)
             {
@@ -86,7 +86,7 @@ namespace ClosedXML_Tests
                 throw new ArgumentException("Can't write to stream", "streamToWrite");
             }
 
-            #endregion
+            #endregion Check params
 
             var buf = new byte[512];
             long length;
@@ -114,58 +114,87 @@ namespace ClosedXML_Tests
         /// <param name="other"></param>
         /// /// <param name="stripColumnWidths"></param>
         /// <returns></returns>
-        public static bool Compare(Stream one, Stream other, bool stripColumnWidths)
+        public static bool Compare(Tuple<Uri, Stream> tuple1, Tuple<Uri, Stream> tuple2, bool stripColumnWidths)
         {
             #region Check
 
-            if (one == null)
+            if (tuple1 == null || tuple1.Item1 == null || tuple1.Item2 == null)
             {
                 throw new ArgumentNullException("one");
             }
-            if (other == null)
+            if (tuple2 == null || tuple2.Item1 == null || tuple2.Item2 == null)
             {
                 throw new ArgumentNullException("other");
             }
-            if (one.Position != 0)
+            if (tuple1.Item2.Position != 0)
             {
                 throw new ArgumentException("Must be in position 0", "one");
             }
-            if (other.Position != 0)
+            if (tuple2.Item2.Position != 0)
             {
                 throw new ArgumentException("Must be in position 0", "other");
             }
 
-            #endregion
+            #endregion Check
 
-            var stringOne = new StreamReader(one).ReadToEnd().StripColumnWidths(stripColumnWidths);
-            var stringOther = new StreamReader(other).ReadToEnd().StripColumnWidths(stripColumnWidths);
+            var stringOne = new StreamReader(tuple1.Item2).ReadToEnd().RemoveIgnoredParts(tuple1.Item1, stripColumnWidths, ignoreGuids: true);
+            var stringOther = new StreamReader(tuple2.Item2).ReadToEnd().RemoveIgnoredParts(tuple2.Item1, stripColumnWidths, ignoreGuids: true);
             return stringOne == stringOther;
         }
 
+        private static string RemoveIgnoredParts(this string s, Uri uri, Boolean ignoreColumnWidths, Boolean ignoreGuids)
+        {
+            foreach (var pair in uriSpecificIgnores.Where(p => p.Key.Equals(uri.OriginalString)))
+                s = pair.Value.Replace(s, "");
+
+            // Collapse empty xml elements
+            s = emptyXmlElementRegex.Replace(s, "<$1 />");
+
+            if (ignoreColumnWidths)
+                s = RemoveColumnWidths(s);
+
+            if (ignoreGuids)
+                s = RemoveGuids(s);
+
+            return s;
+        }
+
+        private static IEnumerable<KeyValuePair<string, Regex>> uriSpecificIgnores = new List<KeyValuePair<string, Regex>>()
+        {
+            // Remove dcterms elements
+            new KeyValuePair<string, Regex>("/docProps/core.xml", new Regex(@"<dcterms:(\w+).*?<\/dcterms:\1>", RegexOptions.Compiled))
+        };
+
+        private static Regex emptyXmlElementRegex = new Regex(@"<([\w:]+)><\/\1>", RegexOptions.Compiled);
         private static Regex columnRegex = new Regex("<x:col.*?width=\"\\d+(\\.\\d+)?\".*?\\/>", RegexOptions.Compiled);
         private static Regex widthRegex = new Regex("width=\"\\d+(\\.\\d+)?\"\\s+", RegexOptions.Compiled);
 
-        private static string StripColumnWidths(this string s, bool stripIt)
+        private static String RemoveColumnWidths(String s)
         {
-            if (!stripIt)
-                return s;
-            else
-            {
-                var replacements = new Dictionary<string, string>();
-                
-                foreach (var m in columnRegex.Matches(s).OfType<Match>())
-                {
-                    var original = m.Groups[0].Value;
-                    var replacement = widthRegex.Replace(original, "");
-                    replacements.Add(original, replacement);
-                }
+            var replacements = new Dictionary<String, String>();
 
-                foreach (var r in replacements)
-                {
-                    s = s.Replace(r.Key, r.Value);
-                }
-                return s;
+            foreach (var m in columnRegex.Matches(s).OfType<Match>())
+            {
+                var original = m.Groups[0].Value;
+                var replacement = widthRegex.Replace(original, "");
+                replacements.Add(original, replacement);
             }
+
+            foreach (var r in replacements)
+            {
+                s = s.Replace(r.Key, r.Value);
+            }
+            return s;
+        }
+
+        private static Regex guidRegex = new Regex(@"{[0-9A-Fa-f]{8}-([0-9A-Fa-f]{4}-){3}[0-9A-Fa-f]{12}}", RegexOptions.Compiled | RegexOptions.Multiline);
+
+        private static String RemoveGuids(String s)
+        {
+            return guidRegex.Replace(s, delegate (Match m)
+            {
+                return string.Empty;
+            });
         }
     }
 }

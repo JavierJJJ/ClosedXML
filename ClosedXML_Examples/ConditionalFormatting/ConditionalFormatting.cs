@@ -1,6 +1,5 @@
-using System;
 using ClosedXML.Excel;
-
+using System;
 
 namespace ClosedXML_Examples
 {
@@ -27,7 +26,6 @@ namespace ClosedXML_Examples
 
     public class CFColorScaleLowHigh : IXLExample
     {
-
         public void Create(String filePath)
         {
             var workbook = new XLWorkbook();
@@ -220,7 +218,6 @@ namespace ClosedXML_Examples
             workbook.SaveAs(filePath);
         }
     }
-
 
     public class CFEqualsString : IXLExample
     {
@@ -527,6 +524,39 @@ namespace ClosedXML_Examples
         }
     }
 
+    public class CFDataBarNegative : IXLExample
+    {
+        public void Create(String filePath)
+        {
+            var workbook = new XLWorkbook();
+            var ws = workbook.AddWorksheet("Sheet1");
+
+            ws.Cell(1, 1).SetValue(-1)
+                .CellBelow().SetValue(1)
+                .CellBelow().SetValue(2)
+                .CellBelow().SetValue(3);
+
+            ws.Range(ws.Cell(1, 1), ws.Cell(4, 1))
+                .AddConditionalFormat()
+                .DataBar(XLColor.Green, XLColor.Red, showBarOnly: false)
+                .LowestValue()
+                .HighestValue();
+
+            ws.Cell(1, 3).SetValue(-20)
+                .CellBelow().SetValue(40)
+                .CellBelow().SetValue(-60)
+                .CellBelow().SetValue(30);
+
+            ws.Range(ws.Cell(1, 3), ws.Cell(4, 3))
+                .AddConditionalFormat()
+                .DataBar(XLColor.Green, XLColor.Red, showBarOnly: true)
+                .Minimum(XLCFContentType.Number, -100)
+                .Maximum(XLCFContentType.Number, 100);
+
+            workbook.SaveAs(filePath);
+        }
+    }
+
     public class CFIconSet : IXLExample
     {
         public void Create(String filePath)
@@ -579,7 +609,7 @@ namespace ClosedXML_Examples
             var workbook = new XLWorkbook();
             var ws = workbook.AddWorksheet("Sheet1");
 
-            ws.Cell(2,1).SetValue(1)
+            ws.Cell(2, 1).SetValue(1)
                 .CellRight().SetValue(1)
                 .CellRight().SetValue(2)
                 .CellRight().SetValue(3);
@@ -587,7 +617,6 @@ namespace ClosedXML_Examples
             var range = ws.RangeUsed();
             range.AddConditionalFormat().WhenEquals("1").Font.SetBold();
             range.InsertRowsAbove(1);
-
 
             workbook.SaveAs(filePath);
         }
@@ -606,7 +635,7 @@ namespace ClosedXML_Examples
               .CellBelow().SetValue(3)
               .CellBelow().SetValue(4);
 
-            ws.RangeUsed().AddConditionalFormat().DataBar(XLColor.Red)
+            ws.RangeUsed().AddConditionalFormat().DataBar(XLColor.Red, XLColor.Green)
                 .LowestValue()
                 .HighestValue();
 
@@ -621,16 +650,111 @@ namespace ClosedXML_Examples
             var workbook = new XLWorkbook();
             var ws = workbook.AddWorksheet("Sheet1");
 
-            using(var range = ws.Range("A1:A10"))
-            {
-                range.AddConditionalFormat().WhenEquals("3")
-                    .Fill.SetBackgroundColor(XLColor.Blue);
-                range.AddConditionalFormat().WhenEquals("2")
-                    .Fill.SetBackgroundColor(XLColor.Green);
-                range.AddConditionalFormat().WhenEquals("1")
-                    .Fill.SetBackgroundColor(XLColor.Red);
-            }
+            var range = ws.Range("A1:A10");
+            range.AddConditionalFormat().WhenEquals("3")
+                .Fill.SetBackgroundColor(XLColor.Blue);
+            range.AddConditionalFormat().WhenEquals("2")
+                .Fill.SetBackgroundColor(XLColor.Green);
+            range.AddConditionalFormat().WhenEquals("1")
+                .Fill.SetBackgroundColor(XLColor.Red);
 
+            workbook.SaveAs(filePath);
+        }
+    }
+
+    public class CFStopIfTrue : IXLExample
+    {
+        public void Create(String filePath)
+        {
+            var workbook = new XLWorkbook();
+            var ws = workbook.AddWorksheet("Sheet1");
+
+            ws.FirstCell().SetValue(6)
+                .CellBelow().SetValue(1)
+                .CellBelow().SetValue(2)
+                .CellBelow().SetValue(3);
+
+            ws.RangeUsed().AddConditionalFormat().SetStopIfTrue().WhenGreaterThan(5);
+
+            ws.RangeUsed().AddConditionalFormat().IconSet(XLIconSetStyle.ThreeTrafficLights2, true, true)
+                .AddValue(XLCFIconSetOperator.EqualOrGreaterThan, "0", XLCFContentType.Number)
+                .AddValue(XLCFIconSetOperator.EqualOrGreaterThan, "2", XLCFContentType.Number)
+                .AddValue(XLCFIconSetOperator.EqualOrGreaterThan, "3", XLCFContentType.Number);
+
+            workbook.SaveAs(filePath);
+        }
+    }
+
+    public class CFDatesOccurring : IXLExample
+    {
+        public void Create(String filePath)
+        {
+            using (var workbook = new XLWorkbook())
+            {
+                var ws = workbook.AddWorksheet("Sheet1");
+
+                var range = ws.Range("A1:A10");
+                range.AddConditionalFormat()
+                    .WhenDateIs(XLTimePeriod.Tomorrow)
+                    .Fill.SetBackgroundColor(XLColor.GrannySmithApple);
+
+                range.AddConditionalFormat()
+                    .WhenDateIs(XLTimePeriod.Yesterday)
+                    .Fill.SetBackgroundColor(XLColor.Orange);
+
+                range.AddConditionalFormat()
+                    .WhenDateIs(XLTimePeriod.InTheLast7Days)
+                    .Fill.SetBackgroundColor(XLColor.Blue);
+
+                range.AddConditionalFormat()
+                    .WhenDateIs(XLTimePeriod.ThisMonth)
+                    .Fill.SetBackgroundColor(XLColor.Red);
+
+                workbook.SaveAs(filePath);
+            }
+        }
+    }
+
+    public class CFDataBars : IXLExample
+    {
+        public void Create(string filePath)
+        {
+            using var workbook = new XLWorkbook();
+            var ws = workbook.AddWorksheet();
+
+            ws.Range("A2:F3").Value = 1;
+            ws.Range("A4:F4").Value = 2;
+            ws.Range("A5:F5").Value = 3;
+            ws.Range("A6:F6").Value = 4;
+
+            ws.Cell("A1").Value = "Automatic";
+            ws.Range("A2:A6").AddConditionalFormat().DataBar(XLColor.Amber);
+            
+            ws.Cell("B1").Value = "Lowest/Highest";
+            ws.Range("B2:B6").AddConditionalFormat().DataBar(XLColor.BallBlue)
+                .LowestValue()
+                .HighestValue();
+
+            ws.Cell("C1").Value = "Value";
+            ws.Range("C2:C6").AddConditionalFormat().DataBar(XLColor.Cadet)
+                .Minimum(XLCFContentType.Number, 0)
+                .Maximum(XLCFContentType.Number, 10);
+
+            ws.Cell("D1").Value = "Percent";
+            ws.Range("D2:D6").AddConditionalFormat().DataBar(XLColor.Desert)
+                .Minimum(XLCFContentType.Percent, 50)
+                .Maximum(XLCFContentType.Percent, 100);
+
+            ws.Cell("E1").Value = "Formula";
+            ws.Range("E2:E6").AddConditionalFormat().DataBar(XLColor.Ecru)
+                .Minimum(XLCFContentType.Formula, "-SUM($A$2:$E$2)")
+                .Maximum(XLCFContentType.Formula, "SUM($A$6:$E$6)");
+
+            ws.Cell("F1").Value = "Percentile";
+            ws.Range("F2:F6").AddConditionalFormat().DataBar(XLColor.Fandango)
+                .Minimum(XLCFContentType.Percentile, 30)
+                .Maximum(XLCFContentType.Percentile, 70);
+            
             workbook.SaveAs(filePath);
         }
     }

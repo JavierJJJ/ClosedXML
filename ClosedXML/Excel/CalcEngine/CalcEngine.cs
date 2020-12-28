@@ -1,3 +1,4 @@
+using ClosedXML.Excel.CalcEngine.Exceptions;
 using ClosedXML.Excel.CalcEngine.Functions;
 using System;
 using System.Collections.Generic;
@@ -18,6 +19,8 @@ namespace ClosedXML.Excel.CalcEngine
     /// </remarks>
     internal class CalcEngine
     {
+        private const string defaultFunctionNameSpace = "_xlfn";
+
         //---------------------------------------------------------------------------
 
         #region ** fields
@@ -34,7 +37,7 @@ namespace ClosedXML.Excel.CalcEngine
         private Dictionary<string, object> _vars;       // table with variables
         private object _dataContext;                    // object with properties
         private bool _optimize;                         // optimize expressions when parsing
-        private ExpressionCache _cache;                 // cache with parsed expressions
+        protected ExpressionCache _cache;               // cache with parsed expressions
         private CultureInfo _ci;                        // culture info used to parse numbers/dates
         private char _decimal, _listSep, _percent;      // localized decimal separator, list separator, percent sign
 
@@ -77,18 +80,20 @@ namespace ClosedXML.Excel.CalcEngine
 
             // skip leading equals sign
             if (_len > 0 && _expr[0] == '=')
-            {
                 _ptr++;
-            }
+
+            // skip leading +'s
+            while (_len > _ptr && _expr[_ptr] == '+')
+                _ptr++;
 
             // parse the expression
             var expr = ParseExpression();
 
             // check for errors
-            if (_token.ID != TKID.END)
-            {
-                Throw();
-            }
+            if (_token.ID == TKID.OPEN)
+                Throw("Unknown function: " + expr.LastParseItem);
+            else if (_token.ID != TKID.END)
+                Throw("Expected end of expression");
 
             // optimize expression
             if (_optimize)
@@ -113,10 +118,9 @@ namespace ClosedXML.Excel.CalcEngine
         /// </remarks>
         public object Evaluate(string expression)
         {
-            var x = //Parse(expression);
-                _cache != null
-                ? _cache[expression]
-                : Parse(expression);
+            var x = _cache != null
+                    ? _cache[expression]
+                    : Parse(expression);
             return x.Evaluate();
         }
 
@@ -252,6 +256,17 @@ namespace ClosedXML.Excel.CalcEngine
 
         #region ** token/keyword tables
 
+        private static readonly IDictionary<string, ErrorExpression.ExpressionErrorType> ErrorMap = new Dictionary<string, ErrorExpression.ExpressionErrorType>()
+        {
+            ["#REF!"] = ErrorExpression.ExpressionErrorType.CellReference,
+            ["#VALUE!"] = ErrorExpression.ExpressionErrorType.CellValue,
+            ["#DIV/0!"] = ErrorExpression.ExpressionErrorType.DivisionByZero,
+            ["#NAME?"] = ErrorExpression.ExpressionErrorType.NameNotRecognized,
+            ["#N/A"] = ErrorExpression.ExpressionErrorType.NoValueAvailable,
+            ["#NULL!"] = ErrorExpression.ExpressionErrorType.NullValue,
+            ["#NUM!"] = ErrorExpression.ExpressionErrorType.NumberInvalid
+        };
+
         // build/get static token table
         private Dictionary<object, Token> GetSymbolTable()
         {
@@ -267,6 +282,7 @@ namespace ClosedXML.Excel.CalcEngine
                 AddToken('.', TKID.PERIOD, TKTYPE.GROUP);
                 AddToken('/', TKID.DIV, TKTYPE.MULDIV);
                 AddToken('\\', TKID.DIVINT, TKTYPE.MULDIV);
+                AddToken('%', TKID.DIV100, TKTYPE.MULDIV_UNARY);
                 AddToken('=', TKID.EQ, TKTYPE.COMPARE);
                 AddToken('>', TKID.GT, TKTYPE.COMPARE);
                 AddToken('<', TKID.LT, TKTYPE.COMPARE);
@@ -297,6 +313,7 @@ namespace ClosedXML.Excel.CalcEngine
                 _fnTbl = new Dictionary<string, FunctionDefinition>(StringComparer.InvariantCultureIgnoreCase);
 
                 // register built-in functions (and constants)
+                Engineering.Register(this);
                 Information.Register(this);
                 Logical.Register(this);
                 Lookup.Register(this);
@@ -304,6 +321,7 @@ namespace ClosedXML.Excel.CalcEngine
                 Text.Register(this);
                 Statistical.Register(this);
                 DateAndTime.Register(this);
+                Financial.Register(this);
             }
             return _fnTbl;
         }
@@ -361,13 +379,26 @@ namespace ClosedXML.Excel.CalcEngine
 
         private Expression ParsePower()
         {
-            var x = ParseUnary();
+            var x = ParseMulDivUnary();
             while (_token.Type == TKTYPE.POWER)
             {
                 var t = _token;
                 GetToken();
-                var a = ParseUnary();
+                var a = ParseMulDivUnary();
                 x = new BinaryExpression(t, x, a);
+            }
+            return x;
+        }
+
+        private Expression ParseMulDivUnary()
+        {
+            var x = ParseUnary();
+            while (_token.Type == TKTYPE.MULDIV_UNARY)
+            {
+                var t = _tkTbl['/'];
+                var a = new Expression(100);
+                x = new BinaryExpression(t, x, a);
+                GetToken();
             }
             return x;
         }
@@ -375,11 +406,19 @@ namespace ClosedXML.Excel.CalcEngine
         private Expression ParseUnary()
         {
             // unary plus and minus
-            if (_token.ID == TKID.ADD || _token.ID == TKID.SUB)
+            if (_token.Type == TKTYPE.ADDSUB)
             {
-                var t = _token;
-                GetToken();
+                var sign = 1;
+                do
+                {
+                    if (_token.ID == TKID.SUB)
+                        sign = -sign;
+                    GetToken();
+                } while (_token.Type == TKTYPE.ADDSUB);
                 var a = ParseAtom();
+                var t = (sign == 1)
+                    ? _tkTbl['+']
+                    : _tkTbl['-'];
                 return new UnaryExpression(t, a);
             }
 
@@ -391,7 +430,6 @@ namespace ClosedXML.Excel.CalcEngine
         {
             string id;
             Expression x = null;
-            FunctionDefinition fnDef = null;
 
             switch (_token.Type)
             {
@@ -405,21 +443,26 @@ namespace ClosedXML.Excel.CalcEngine
 
                     // get identifier
                     id = (string)_token.Value;
+                    FunctionDefinition functionDefinition;
+
+                    var foundFunction = _fnTbl.TryGetValue(id, out functionDefinition);
+                    if (!foundFunction && id.StartsWith($"{defaultFunctionNameSpace}."))
+                        foundFunction = _fnTbl.TryGetValue(id.Substring(defaultFunctionNameSpace.Length + 1), out functionDefinition);
 
                     // look for functions
-                    if (_fnTbl.TryGetValue(id, out fnDef))
+                    if (foundFunction)
                     {
                         var p = GetParameters();
                         var pCnt = p == null ? 0 : p.Count;
-                        if (fnDef.ParmMin != -1 && pCnt < fnDef.ParmMin)
+                        if (functionDefinition.ParmMin != -1 && pCnt < functionDefinition.ParmMin)
                         {
-                            Throw("Too few parameters.");
+                            Throw(string.Format("Too few parameters for function '{0}'. Expected a minimum of {1} and a maximum of {2}.", id, functionDefinition.ParmMin, functionDefinition.ParmMax));
                         }
-                        if (fnDef.ParmMax != -1 && pCnt > fnDef.ParmMax)
+                        if (functionDefinition.ParmMax != -1 && pCnt > functionDefinition.ParmMax)
                         {
-                            Throw("Too many parameters.");
+                            Throw(string.Format("Too many parameters for function '{0}'.Expected a minimum of {1} and a maximum of {2}.", id, functionDefinition.ParmMin, functionDefinition.ParmMax));
                         }
-                        x = new FunctionExpression(fnDef, p);
+                        x = new FunctionExpression(functionDefinition, p);
                         break;
                     }
 
@@ -432,13 +475,10 @@ namespace ClosedXML.Excel.CalcEngine
 
                     // look for external objects
                     var xObj = GetExternalObject(id);
-                    if (xObj != null)
-                    {
-                        x = new XObjectExpression(xObj);
-                        break;
-                    }
+                    if (xObj == null)
+                        throw new NameNotRecognizedException($"The identifier `{id}` was not recognised.");
 
-                    Throw("Unexpected identifier");
+                    x = new XObjectExpression(xObj);
                     break;
 
                 // sub-expressions
@@ -461,6 +501,10 @@ namespace ClosedXML.Excel.CalcEngine
                         Throw("Unbalanced parenthesis.");
                     }
 
+                    break;
+
+                case TKTYPE.ERROR:
+                    x = new ErrorExpression((ErrorExpression.ExpressionErrorType)_token.Value);
                     break;
             }
 
@@ -509,19 +553,16 @@ namespace ClosedXML.Excel.CalcEngine
             // operators
             // this gets called a lot, so it's pretty optimized.
             // note that operators must start with non-letter/digit characters.
-            var isLetter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-            var isDigit = c >= '0' && c <= '9';
+            var isLetter = char.IsLetter(c);
+            var isDigit = char.IsDigit(c);
 
-            var isEnclosed = matchingClosingSymbols.Keys.Contains(c);
-            char matchingClosingSymbol = '\0';
-            if (isEnclosed)
-                matchingClosingSymbol = matchingClosingSymbols[c];
+            var isEnclosed = matchingClosingSymbols.TryGetValue(c, out char matchingClosingSymbol);
 
             if (!isLetter && !isDigit && !isEnclosed)
             {
                 // if this is a number starting with a decimal, don't parse as operator
-                var nxt = _ptr + 1 < _len ? _expr[_ptr + 1] : 0;
-                bool isNumber = c == _decimal && nxt >= '0' && nxt <= '9';
+                var nxt = _ptr + 1 < _len ? _expr[_ptr + 1] : '0';
+                bool isNumber = c == _decimal && char.IsDigit(nxt);
                 if (!isNumber)
                 {
                     // look up localized list separator
@@ -533,21 +574,19 @@ namespace ClosedXML.Excel.CalcEngine
                     }
 
                     // look up single-char tokens on table
-                    Token tk;
-                    if (_tkTbl.TryGetValue(c, out tk))
+                    if (_tkTbl.TryGetValue(c, out Token tk))
                     {
                         // save token we found
                         _token = tk;
                         _ptr++;
 
                         // look for double-char tokens (special case)
-                        if (_ptr < _len && (c == '>' || c == '<'))
+                        if (_ptr < _len
+                            && (c == '>' || c == '<')
+                            && _tkTbl.TryGetValue(_expr.Substring(_ptr - 1, 2), out tk))
                         {
-                            if (_tkTbl.TryGetValue(_expr.Substring(_ptr - 1, 2), out tk))
-                            {
-                                _token = tk;
-                                _ptr++;
-                            }
+                            _token = tk;
+                            _ptr++;
                         }
 
                         // found token on the table
@@ -560,7 +599,6 @@ namespace ClosedXML.Excel.CalcEngine
             if (isDigit || c == _decimal)
             {
                 var sci = false;
-                var pct = false;
                 var div = -1.0; // use double, not int (this may get really big)
                 var val = 0.0;
                 for (i = 0; i + _ptr < _len; i++)
@@ -568,7 +606,7 @@ namespace ClosedXML.Excel.CalcEngine
                     c = _expr[_ptr + i];
 
                     // digits always OK
-                    if (c >= '0' && c <= '9')
+                    if (char.IsDigit(c))
                     {
                         val = val * 10 + (c - '0');
                         if (div > -1)
@@ -594,14 +632,6 @@ namespace ClosedXML.Excel.CalcEngine
                         continue;
                     }
 
-                    // percentage?
-                    if (c == _percent)
-                    {
-                        pct = true;
-                        i++;
-                        break;
-                    }
-
                     // end of literal
                     break;
                 }
@@ -613,10 +643,6 @@ namespace ClosedXML.Excel.CalcEngine
                     if (div > 1)
                     {
                         val /= div;
-                    }
-                    if (pct)
-                    {
-                        val /= 100.0;
                     }
                 }
                 else
@@ -662,26 +688,12 @@ namespace ClosedXML.Excel.CalcEngine
                 return;
             }
 
-            // parse dates (review)
-            if (c == '#')
+            // parse #REF! (and other errors) in formula
+            if (c == '#' && ErrorMap.Any(pair => _len > _ptr + pair.Key.Length && _expr.Substring(_ptr, pair.Key.Length).Equals(pair.Key, StringComparison.OrdinalIgnoreCase)))
             {
-                // look for end #
-                for (i = 1; i + _ptr < _len; i++)
-                {
-                    c = _expr[_ptr + i];
-                    if (c == '#') break;
-                }
-
-                // check that we got the end of the date
-                if (c != '#')
-                {
-                    Throw("Can't find final date delimiter ('#').");
-                }
-
-                // end of date
-                var lit = _expr.Substring(_ptr + 1, i - 1);
-                _ptr += i + 1;
-                _token = new Token(DateTime.Parse(lit, _ci), TKID.ATOM, TKTYPE.LITERAL);
+                var errorPair = ErrorMap.Single(pair => _len > _ptr + pair.Key.Length && _expr.Substring(_ptr, pair.Key.Length).Equals(pair.Key, StringComparison.OrdinalIgnoreCase));
+                _ptr += errorPair.Key.Length;
+                _token = new Token(errorPair.Value, TKID.ATOM, TKTYPE.ERROR);
                 return;
             }
 
@@ -695,8 +707,8 @@ namespace ClosedXML.Excel.CalcEngine
             for (i = 1; i + _ptr < _len; i++)
             {
                 c = _expr[_ptr + i];
-                isLetter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-                isDigit = c >= '0' && c <= '9';
+                isLetter = char.IsLetter(c);
+                isDigit = char.IsDigit(c);
 
                 if (isEnclosed && c == matchingClosingSymbol)
                 {
@@ -705,15 +717,15 @@ namespace ClosedXML.Excel.CalcEngine
 
                     i++;
                     c = _expr[_ptr + i];
-                    isLetter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
-                    isDigit = c >= '0' && c <= '9';
+                    isLetter = char.IsLetter(c);
+                    isDigit = char.IsDigit(c);
                 }
 
                 var disallowedSymbols = new List<char>() { '\\', '/', '*', '[', ':', '?' };
                 if (isEnclosed && disallowedSymbols.Contains(c))
                     break;
 
-                var allowedSymbols = new List<char>() { '_' };
+                var allowedSymbols = new List<char>() { '_', '.' };
 
                 if (!isLetter && !isDigit
                     && !(isEnclosed || allowedSymbols.Contains(c))
@@ -771,10 +783,10 @@ namespace ClosedXML.Excel.CalcEngine
             }
 
             // make sure the list was closed correctly
-            if (_token.ID != TKID.CLOSE)
-            {
-                Throw();
-            }
+            if (_token.ID == TKID.OPEN)
+                Throw("Unknown function: " + expr.LastParseItem);
+            else if (_token.ID != TKID.CLOSE)
+                Throw("Syntax error: expected ')'");
 
             // done
             return parms;
@@ -816,7 +828,7 @@ namespace ClosedXML.Excel.CalcEngine
 
         private static void Throw(string msg)
         {
-            throw new Exception(msg);
+            throw new ExpressionParseException(msg);
         }
 
         #endregion ** static helpers

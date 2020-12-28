@@ -9,20 +9,16 @@ namespace ClosedXML.Excel
 {
     internal class XLWorksheets : IXLWorksheets, IEnumerable<XLWorksheet>
     {
-        #region Constructor
-
         private readonly XLWorkbook _workbook;
-        private readonly Dictionary<String, XLWorksheet> _worksheets = new Dictionary<String, XLWorksheet>();
-
-        #endregion Constructor
-
-        public HashSet<String> Deleted = new HashSet<String>();
+        private readonly Dictionary<String, XLWorksheet> _worksheets = new Dictionary<String, XLWorksheet>(StringComparer.OrdinalIgnoreCase);
+        internal ICollection<String> Deleted { get; private set; }
 
         #region Constructor
 
         public XLWorksheets(XLWorkbook workbook)
         {
             _workbook = workbook;
+            Deleted = new HashSet<String>();
         }
 
         #endregion Constructor
@@ -44,10 +40,14 @@ namespace ClosedXML.Excel
             get { return _worksheets.Count; }
         }
 
+        public Boolean Contains(String sheetName)
+        {
+            return _worksheets.ContainsKey(sheetName);
+        }
+
         public bool TryGetWorksheet(string sheetName, out IXLWorksheet worksheet)
         {
-            XLWorksheet w;
-            if (_worksheets.TryGetValue(sheetName, out w))
+            if (_worksheets.TryGetValue(sheetName.UnescapeSheetName(), out XLWorksheet w))
             {
                 worksheet = w;
                 return true;
@@ -56,43 +56,39 @@ namespace ClosedXML.Excel
             return false;
         }
 
-        internal static string TrimSheetName(string sheetName)
-        {
-            if (sheetName.StartsWith("'") && sheetName.EndsWith("'") && sheetName.Length > 2)
-                sheetName = sheetName.Substring(1, sheetName.Length - 2);
-
-            return sheetName;
-        }
-
         public IXLWorksheet Worksheet(String sheetName)
         {
-            sheetName = TrimSheetName(sheetName);
+            sheetName = sheetName.UnescapeSheetName();
 
-            XLWorksheet w;
-
-            if (_worksheets.TryGetValue(sheetName, out w))
+            if (_worksheets.TryGetValue(sheetName, out XLWorksheet w))
                 return w;
 
-            var wss = _worksheets.Where(ws => string.Equals(ws.Key, sheetName, StringComparison.OrdinalIgnoreCase));
-            if (wss.Any())
-                return wss.First().Value;
-
-            throw new Exception("There isn't a worksheet named '" + sheetName + "'.");
+            throw new ArgumentException("There isn't a worksheet named '" + sheetName + "'.");
         }
 
         public IXLWorksheet Worksheet(Int32 position)
         {
             int wsCount = _worksheets.Values.Count(w => w.Position == position);
             if (wsCount == 0)
-                throw new Exception("There isn't a worksheet associated with that position.");
+                throw new ArgumentException("There isn't a worksheet associated with that position.");
 
             if (wsCount > 1)
             {
-                throw new Exception(
+                throw new ArgumentException(
                     "Can't retrieve a worksheet because there are multiple worksheets associated with that position.");
             }
 
             return _worksheets.Values.Single(w => w.Position == position);
+        }
+
+        public IXLWorksheet Add()
+        {
+            return Add(GetNextWorksheetName());
+        }
+
+        public IXLWorksheet Add(Int32 position)
+        {
+            return Add(GetNextWorksheetName(), position);
         }
 
         public IXLWorksheet Add(String sheetName)
@@ -115,7 +111,7 @@ namespace ClosedXML.Excel
 
         private void Add(String sheetName, XLWorksheet sheet)
         {
-            if (_worksheets.Any(ws => ws.Key.Equals(sheetName, StringComparison.OrdinalIgnoreCase)))
+            if (_worksheets.ContainsKey(sheetName))
                 throw new ArgumentException(String.Format("A worksheet with the same name ({0}) has already been added.", sheetName), nameof(sheetName));
 
             _worksheets.Add(sheetName, sheet);
@@ -130,19 +126,22 @@ namespace ClosedXML.Excel
         {
             int wsCount = _worksheets.Values.Count(w => w.Position == position);
             if (wsCount == 0)
-                throw new Exception("There isn't a worksheet associated with that index.");
+                throw new ArgumentException("There isn't a worksheet associated with that index.");
 
             if (wsCount > 1)
-                throw new Exception(
+                throw new ArgumentException(
                     "Can't delete the worksheet because there are multiple worksheets associated with that index.");
 
             var ws = _worksheets.Values.Single(w => w.Position == position);
-            if (!XLHelper.IsNullOrWhiteSpace(ws.RelId) && !Deleted.Contains(ws.RelId))
+            if (!String.IsNullOrWhiteSpace(ws.RelId) && !Deleted.Contains(ws.RelId))
                 Deleted.Add(ws.RelId);
 
             _worksheets.RemoveAll(w => w.Position == position);
             _worksheets.Values.Where(w => w.Position > position).ForEach(w => w._position -= 1);
             _workbook.UnsupportedSheets.Where(w => w.Position > position).ForEach(w => w.Position -= 1);
+            _workbook.InvalidateFormulas();
+
+            ws.Cleanup();
         }
 
         IEnumerator<IXLWorksheet> IEnumerable<IXLWorksheet>.GetEnumerator()
@@ -163,8 +162,7 @@ namespace ClosedXML.Excel
         public IXLWorksheet Add(DataTable dataTable, String sheetName)
         {
             var ws = Add(sheetName);
-            ws.Cell(1, 1).InsertTable(dataTable);
-            ws.Columns().AdjustToContents(1, 75);
+            ws.Cell(1, 1).InsertTable(dataTable, sheetName);
             return ws;
         }
 
@@ -178,14 +176,30 @@ namespace ClosedXML.Excel
 
         public void Rename(String oldSheetName, String newSheetName)
         {
-            if (XLHelper.IsNullOrWhiteSpace(oldSheetName) || !_worksheets.ContainsKey(oldSheetName)) return;
+            if (String.IsNullOrWhiteSpace(oldSheetName) || !_worksheets.TryGetValue(oldSheetName, out XLWorksheet ws)) return;
 
-            if (_worksheets.Any(ws1 => ws1.Key.Equals(newSheetName, StringComparison.OrdinalIgnoreCase)))
+            if (!oldSheetName.Equals(newSheetName, StringComparison.OrdinalIgnoreCase)
+                && _worksheets.ContainsKey(newSheetName))
                 throw new ArgumentException(String.Format("A worksheet with the same name ({0}) has already been added.", newSheetName), nameof(newSheetName));
 
-            var ws = _worksheets[oldSheetName];
             _worksheets.Remove(oldSheetName);
             Add(newSheetName, ws);
         }
+
+        #region Private members
+
+        private String GetNextWorksheetName()
+        {
+            var worksheetNumber = this.Count + 1;
+            var sheetName = $"Sheet{worksheetNumber}";
+            while (_worksheets.Values.Any(p => p.Name.Equals(sheetName, StringComparison.OrdinalIgnoreCase)))
+            {
+                worksheetNumber++;
+                sheetName = $"Sheet{worksheetNumber}";
+            }
+            return sheetName;
+        }
+
+        #endregion Private members
     }
 }

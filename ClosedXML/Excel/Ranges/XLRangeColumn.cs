@@ -1,35 +1,32 @@
+using System;
+using System.Linq;
+
 namespace ClosedXML.Excel
 {
-    using System;
-    using System.Linq;
-
-
     internal class XLRangeColumn : XLRangeBase, IXLRangeColumn
     {
         #region Constructor
 
-        public XLRangeColumn(XLRangeParameters rangeParameters, bool quickLoad)
-            : base(rangeParameters.RangeAddress)
+        /// <summary>
+        /// The direct contructor should only be used in <see cref="XLWorksheet.RangeFactory"/>.
+        /// </summary>
+        public XLRangeColumn(XLRangeParameters rangeParameters)
+            : base(rangeParameters.RangeAddress, (rangeParameters.DefaultStyle as XLStyle).Value)
         {
-            if (quickLoad) return;
-
-			SubscribeToShiftedRows((range, rowsShifted) => this.WorksheetRangeShiftedRows(range, rowsShifted));
-			SubscribeToShiftedColumns((range, columnsShifted) => this.WorksheetRangeShiftedColumns(range, columnsShifted));
-            SetStyle(rangeParameters.DefaultStyle);
         }
 
-        #endregion
+        #endregion Constructor
 
         #region IXLRangeColumn Members
 
-        IXLCell IXLRangeColumn.Cell(int row)
+        IXLCell IXLRangeColumn.Cell(int rowNumber)
         {
-            return Cell(row);
+            return Cell(rowNumber);
         }
 
-        public new IXLCells Cells(string cellsInColumn)
+        public override IXLCells Cells(string cellsInColumn)
         {
-            var retVal = new XLCells(false, false);
+            var retVal = new XLCells(false, XLCellsUsedOptions.AllContents);
             var rangePairs = cellsInColumn.Split(',');
             foreach (string pair in rangePairs)
                 retVal.Add(Range(pair.Trim()).RangeAddress);
@@ -43,6 +40,22 @@ namespace ClosedXML.Excel
 
         public void Delete()
         {
+            Delete(true);
+        }
+
+        internal void Delete(Boolean deleteTableField)
+        {
+            if (deleteTableField && IsTableColumn())
+            {
+                var table = Table as XLTable;
+                var firstCellValue = Cell(1).Value.ToString();
+                if (!table.FieldNames.ContainsKey(firstCellValue))
+                    throw new ArgumentException(string.Format("Field {0} not found.", firstCellValue));
+
+                var field = table.Fields.Cast<XLTableField>().Single(f => f.Name == firstCellValue);
+                field.Delete(false);
+            }
+
             Delete(XLShiftDeletedCells.ShiftCellsLeft);
         }
 
@@ -76,7 +89,6 @@ namespace ClosedXML.Excel
             base.Sort(1, sortOrder, matchCase, ignoreBlanks);
             return this;
         }
-
 
         public new IXLRangeColumn CopyTo(IXLCell target)
         {
@@ -136,9 +148,7 @@ namespace ClosedXML.Excel
                 string lastRow;
                 if (trimmedPair.Contains(':') || trimmedPair.Contains('-'))
                 {
-                    var rowRange = trimmedPair.Contains('-')
-                                       ? trimmedPair.Replace('-', ':').Split(':')
-                                       : trimmedPair.Split(':');
+                    var rowRange = trimmedPair.Split(':', '-');
 
                     firstRow = rowRange[0];
                     lastRow = rowRange[1];
@@ -155,7 +165,7 @@ namespace ClosedXML.Excel
             return retVal;
         }
 
-        public IXLRangeColumn SetDataType(XLCellValues dataType)
+        public IXLRangeColumn SetDataType(XLDataType dataType)
         {
             DataType = dataType;
             return this;
@@ -166,21 +176,26 @@ namespace ClosedXML.Excel
             return Worksheet.Column(RangeAddress.FirstAddress.ColumnNumber);
         }
 
-        #endregion
+        #endregion IXLRangeColumn Members
+
+        public override XLRangeType RangeType
+        {
+            get { return XLRangeType.RangeColumn; }
+        }
 
         public XLCell Cell(int row)
         {
             return Cell(row, 1);
         }
 
-        private void WorksheetRangeShiftedColumns(XLRange range, int columnsShifted)
+        internal override void WorksheetRangeShiftedColumns(XLRange range, int columnsShifted)
         {
-            ShiftColumns(RangeAddress, range, columnsShifted);
+            RangeAddress = (XLRangeAddress)ShiftColumns(RangeAddress, range, columnsShifted);
         }
 
-        private void WorksheetRangeShiftedRows(XLRange range, int rowsShifted)
+        internal override void WorksheetRangeShiftedRows(XLRange range, int rowsShifted)
         {
-            ShiftRows(RangeAddress, range, rowsShifted);
+            RangeAddress = (XLRangeAddress)ShiftRows(RangeAddress, range, rowsShifted);
         }
 
         public XLRange Range(int firstRow, int lastRow)
@@ -233,13 +248,13 @@ namespace ClosedXML.Excel
                 {
                     if (thisCell.DataType == otherCell.DataType)
                     {
-                        if (thisCell.DataType == XLCellValues.Text)
+                        if (thisCell.DataType == XLDataType.Text)
                         {
                             comparison = e.MatchCase
                                              ? thisCell.InnerText.CompareTo(otherCell.InnerText)
                                              : String.Compare(thisCell.InnerText, otherCell.InnerText, true);
                         }
-                        else if (thisCell.DataType == XLCellValues.TimeSpan)
+                        else if (thisCell.DataType == XLDataType.TimeSpan)
                             comparison = thisCell.GetTimeSpan().CompareTo(otherCell.GetTimeSpan());
                         else
                             comparison = Double.Parse(thisCell.InnerText, XLHelper.NumberStyle, XLHelper.ParseCulture).CompareTo(Double.Parse(otherCell.InnerText, XLHelper.NumberStyle, XLHelper.ParseCulture));
@@ -289,7 +304,7 @@ namespace ClosedXML.Excel
             return ColumnShift(step * -1);
         }
 
-        #endregion
+        #endregion XLRangeColumn Left
 
         #region XLRangeColumn Right
 
@@ -313,43 +328,65 @@ namespace ClosedXML.Excel
             return ColumnShift(step);
         }
 
-        #endregion
-
+        #endregion XLRangeColumn Right
 
         public IXLTable AsTable()
         {
-            using (var asRange = AsRange())
-               return asRange.AsTable();
+            if (IsTableColumn())
+                throw new InvalidOperationException("This column is already part of a table.");
+
+            return AsRange().AsTable();
         }
 
         public IXLTable AsTable(string name)
         {
-            using (var asRange = AsRange())
-                return asRange.AsTable(name);
+            if (IsTableColumn())
+                throw new InvalidOperationException("This column is already part of a table.");
+
+            return AsRange().AsTable(name);
         }
 
         public IXLTable CreateTable()
         {
-            using (var asRange = AsRange())
-                return asRange.CreateTable();
+            if (IsTableColumn())
+                throw new InvalidOperationException("This column is already part of a table.");
+
+            return AsRange().CreateTable();
         }
 
         public IXLTable CreateTable(string name)
         {
-            using (var asRange = AsRange())
-                return asRange.CreateTable(name);
+            if (IsTableColumn())
+                throw new InvalidOperationException("This column is already part of a table.");
+
+            return AsRange().CreateTable(name);
         }
 
-        public new IXLRangeColumn Clear(XLClearOptions clearOptions = XLClearOptions.ContentsAndFormats)
+        public new IXLRangeColumn Clear(XLClearOptions clearOptions = XLClearOptions.All)
         {
             base.Clear(clearOptions);
             return this;
         }
 
-        public IXLRangeColumn ColumnUsed(Boolean includeFormats = false)
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
+        public IXLRangeColumn ColumnUsed(Boolean includeFormats)
         {
-            return Column(FirstCellUsed(includeFormats), LastCellUsed(includeFormats));
+            return ColumnUsed(includeFormats
+                ? XLCellsUsedOptions.All
+                : XLCellsUsedOptions.AllContents);
         }
 
+        public IXLRangeColumn ColumnUsed(XLCellsUsedOptions options = XLCellsUsedOptions.AllContents)
+        {
+            return Column((this as IXLRangeBase).FirstCellUsed(options),
+                          (this as IXLRangeBase).LastCellUsed(options));
+        }
+
+        internal IXLTable Table { get; set; }
+
+        public Boolean IsTableColumn()
+        {
+            return Table != null;
+        }
     }
 }

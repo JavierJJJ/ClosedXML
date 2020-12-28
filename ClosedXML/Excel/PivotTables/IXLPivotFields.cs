@@ -1,17 +1,28 @@
+// Keep this file CodeMaid organised and cleaned
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 
 namespace ClosedXML.Excel
 {
-    public interface IXLPivotFields: IEnumerable<IXLPivotField>
+    public interface IXLPivotFields : IEnumerable<IXLPivotField>
     {
         IXLPivotField Add(String sourceName);
-        IXLPivotField Add(String sourceName, String customName);
-        void Clear();
-        void Remove(String sourceName);
 
-        int IndexOf(IXLPivotField pf);
+        IXLPivotField Add(String sourceName, String customName);
+
+        void Clear();
+
+        Boolean Contains(String sourceName);
+
+        Boolean Contains(IXLPivotField pivotField);
+
+        IXLPivotField Get(String sourceName);
+
+        IXLPivotField Get(Int32 index);
+
+        Int32 IndexOf(String sourceName);
+        Int32 IndexOf(IXLPivotField pf);
+
+        void Remove(String sourceName);
     }
 }

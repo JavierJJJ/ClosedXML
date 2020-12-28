@@ -1,5 +1,5 @@
 using System;
-using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 
 namespace ClosedXML.Excel.CalcEngine
@@ -23,6 +23,50 @@ namespace ClosedXML.Excel.CalcEngine
             _ws = ws;
         }
 
+        private IList<IXLRange> _cellRanges;
+
+        public ExpressionCache ExpressionCache => this._cache;
+
+        /// <summary>
+        /// Get a collection of cell ranges included into the expression. Order is not preserved.
+        /// </summary>
+        /// <param name="expression">Formula to parse.</param>
+        /// <returns>Collection of ranges included into the expression.</returns>
+        public IEnumerable<IXLRange> GetPrecedentRanges(string expression)
+        {
+            _cellRanges = new List<IXLRange>();
+            Parse(expression);
+            var ranges = _cellRanges;
+            _cellRanges = null;
+            var visitedRanges = new HashSet<IXLRangeAddress>(new XLRangeAddressComparer(true));
+            foreach (var range in ranges)
+            {
+                if (!visitedRanges.Contains(range.RangeAddress))
+                {
+                    visitedRanges.Add(range.RangeAddress);
+                    yield return range;
+                }
+            }
+        }
+
+        public IEnumerable<IXLCell> GetPrecedentCells(string expression)
+        {
+            if (!String.IsNullOrWhiteSpace(expression))
+            {
+                var ranges = GetPrecedentRanges(expression);
+                var visitedCells = new HashSet<IXLAddress>(new XLAddressComparer(true));
+                var cells = ranges.SelectMany(range => range.Cells()).Distinct();
+                foreach (var cell in cells)
+                {
+                    if (!visitedCells.Contains(cell.Address))
+                    {
+                        visitedCells.Add(cell.Address);
+                        yield return cell;
+                    }
+                }
+            }
+        }
+
         public override object GetExternalObject(string identifier)
         {
             if (identifier.Contains("!") && _wb != null)
@@ -39,74 +83,55 @@ namespace ClosedXML.Excel.CalcEngine
                     .Distinct();
 
                 if (!referencedSheetNames.Any())
-                    return new CellRangeReference(_ws.Range(identifier), this);
+                    return GetCellRangeReference(_ws.Range(identifier));
                 else if (referencedSheetNames.Count() > 1)
                     throw new ArgumentOutOfRangeException(referencedSheetNames.Last(), "Cross worksheet references may references no more than 1 other worksheet");
                 else
                 {
-                    IXLWorksheet worksheet;
-                    if (!_wb.TryGetWorksheet(referencedSheetNames.Single(), out worksheet))
+                    if (!_wb.TryGetWorksheet(referencedSheetNames.Single(), out IXLWorksheet worksheet))
                         throw new ArgumentOutOfRangeException(referencedSheetNames.Single(), "The required worksheet cannot be found");
 
                     identifier = identifier.ToLower().Replace(string.Format("{0}!", worksheet.Name.ToLower()), "");
 
-                    return new CellRangeReference(worksheet.Range(identifier), this);
+                    return GetCellRangeReference(worksheet.Range(identifier));
                 }
             }
             else if (_ws != null)
-                return new CellRangeReference(_ws.Range(identifier), this);
-            else
+            {
+                if (TryGetNamedRange(identifier, _ws, out IXLNamedRange namedRange))
+                {
+                    var references = (namedRange as XLNamedRange).RangeList.Select(r =>
+                        XLHelper.IsValidRangeAddress(r)
+                            ? GetCellRangeReference(_ws.Workbook.Range(r))
+                            : new XLCalcEngine(_ws).Evaluate(r.ToString())
+                        );
+                    if (references.Count() == 1)
+                        return references.Single();
+                    return references;
+                }
+
+                return GetCellRangeReference(_ws.Range(identifier));
+            }
+            else if (XLHelper.IsValidRangeAddress(identifier))
                 return identifier;
-        }
-    }
-
-    internal class CellRangeReference : IValueObject, IEnumerable
-    {
-        private IXLRange _range;
-        private XLCalcEngine _ce;
-
-        public CellRangeReference(IXLRange range, XLCalcEngine ce)
-        {
-            _range = range;
-            _ce = ce;
+            else
+                return null;
         }
 
-        public IXLRange Range { get { return _range; } }
-
-        // ** IValueObject
-        public object GetValue()
+        private bool TryGetNamedRange(string identifier, IXLWorksheet worksheet, out IXLNamedRange namedRange)
         {
-            return GetValue(_range.FirstCell());
+            return worksheet.NamedRanges.TryGetValue(identifier, out namedRange) ||
+                   worksheet.Workbook.NamedRanges.TryGetValue(identifier, out namedRange);
         }
 
-        // ** IEnumerable
-        public IEnumerator GetEnumerator()
+        private CellRangeReference GetCellRangeReference(IXLRange range)
         {
-            return _range.Cells().Select(GetValue).GetEnumerator();
-        }
+            if (range == null)
+                return null;
 
-        private Boolean _evaluating;
-
-        // ** implementation
-        private object GetValue(IXLCell cell)
-        {
-            if (_evaluating)
-            {
-                throw new Exception("Circular Reference");
-            }
-            try
-            {
-                _evaluating = true;
-                var f = cell.FormulaA1;
-                if (XLHelper.IsNullOrWhiteSpace(f))
-                    return cell.Value;
-                else
-                    return new XLCalcEngine(cell.Worksheet).Evaluate(f);
-            }
-            finally
-            {
-                _evaluating = false;
-            }
+            var res = new CellRangeReference(range, this);
+            _cellRanges?.Add(res.Range);
+            return res;
         }
     }
 }

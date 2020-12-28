@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 
 namespace ClosedXML.Excel
 {
     public enum XLPivotTableTheme
     {
+        None,
         PivotStyleDark1,
         PivotStyleDark10,
         PivotStyleDark11,
@@ -90,6 +92,13 @@ namespace ClosedXML.Excel
         PivotStyleMedium9
     }
 
+    public enum XLPivotSortType
+    {
+        Default = 0,
+        Ascending = 1,
+        Descending = 2
+    }
+
     public enum XLPivotSubtotals
     {
         DoNotShow,
@@ -98,7 +107,10 @@ namespace ClosedXML.Excel
     }
 
     public enum XLFilterAreaOrder { DownThenOver, OverThenDown }
+
     public enum XLItemsToRetain { Automatic, None, Max }
+
+    public enum XLPivotTableSourceType { Range, Table }
 
     public interface IXLPivotTable
     {
@@ -106,7 +118,7 @@ namespace ClosedXML.Excel
 
         IXLPivotFields Fields { get; }
         IXLPivotFields ReportFilters { get; }
-        IXLPivotFields  ColumnLabels { get; }
+        IXLPivotFields ColumnLabels { get; }
         IXLPivotFields RowLabels { get; }
         IXLPivotValues Values { get; }
 
@@ -114,23 +126,31 @@ namespace ClosedXML.Excel
         String Title { get; set; }
         String Description { get; set; }
 
+        String ColumnHeaderCaption { get; set; }
+        String RowHeaderCaption { get; set; }
+
         IXLCell TargetCell { get; set; }
+
         IXLRange SourceRange { get; set; }
+        IXLTable SourceTable { get; set; }
+        XLPivotTableSourceType SourceType { get; }
+
+        IEnumerable<String> SourceRangeFieldsAvailable { get; }
 
         Boolean MergeAndCenterWithLabels { get; set; } // MergeItem
         Int32 RowLabelIndent { get; set; } // Indent
-        XLFilterAreaOrder FilterAreaOrder { get; set; } // PageOverThenDown 
+        XLFilterAreaOrder FilterAreaOrder { get; set; } // PageOverThenDown
         Int32 FilterFieldsPageWrap { get; set; } // PageWrap
         String ErrorValueReplacement { get; set; } // ErrorCaption
         String EmptyCellReplacement { get; set; } // MissingCaption
-        Boolean AutofitColumns { get; set; } //UseAutoFormatting 
-        Boolean PreserveCellFormatting { get; set; } // PreserveFormatting 
-        
-        Boolean ShowGrandTotalsRows { get; set; } // RowGrandTotals 
-        Boolean ShowGrandTotalsColumns { get; set; } // ColumnGrandTotals 
+        Boolean AutofitColumns { get; set; } //UseAutoFormatting
+        Boolean PreserveCellFormatting { get; set; } // PreserveFormatting
+
+        Boolean ShowGrandTotalsRows { get; set; } // RowGrandTotals
+        Boolean ShowGrandTotalsColumns { get; set; } // ColumnGrandTotals
         Boolean FilteredItemsInSubtotals { get; set; } // Subtotal filtered page items
-        Boolean AllowMultipleFilters { get; set; } // MultipleFieldFilters 
-        Boolean UseCustomListsForSorting { get; set; } // CustomListSort 
+        Boolean AllowMultipleFilters { get; set; } // MultipleFieldFilters
+        Boolean UseCustomListsForSorting { get; set; } // CustomListSort
 
         Boolean ShowExpandCollapseButtons { get; set; }
         Boolean ShowContextualTooltips { get; set; }
@@ -154,44 +174,76 @@ namespace ClosedXML.Excel
         Boolean EnableCellEditing { get; set; }
 
         IXLPivotTable SetName(String value);
+
         IXLPivotTable SetTitle(String value);
+
         IXLPivotTable SetDescription(String value);
 
         IXLPivotTable SetMergeAndCenterWithLabels(); IXLPivotTable SetMergeAndCenterWithLabels(Boolean value);
+
         IXLPivotTable SetRowLabelIndent(Int32 value);
+
         IXLPivotTable SetFilterAreaOrder(XLFilterAreaOrder value);
+
         IXLPivotTable SetFilterFieldsPageWrap(Int32 value);
+
         IXLPivotTable SetErrorValueReplacement(String value);
+
         IXLPivotTable SetEmptyCellReplacement(String value);
+
         IXLPivotTable SetAutofitColumns(); IXLPivotTable SetAutofitColumns(Boolean value);
+
         IXLPivotTable SetPreserveCellFormatting(); IXLPivotTable SetPreserveCellFormatting(Boolean value);
 
         IXLPivotTable SetShowGrandTotalsRows(); IXLPivotTable SetShowGrandTotalsRows(Boolean value);
+
         IXLPivotTable SetShowGrandTotalsColumns(); IXLPivotTable SetShowGrandTotalsColumns(Boolean value);
+
         IXLPivotTable SetFilteredItemsInSubtotals(); IXLPivotTable SetFilteredItemsInSubtotals(Boolean value);
+
         IXLPivotTable SetAllowMultipleFilters(); IXLPivotTable SetAllowMultipleFilters(Boolean value);
+
         IXLPivotTable SetUseCustomListsForSorting(); IXLPivotTable SetUseCustomListsForSorting(Boolean value);
 
         IXLPivotTable SetShowExpandCollapseButtons(); IXLPivotTable SetShowExpandCollapseButtons(Boolean value);
+
         IXLPivotTable SetShowContextualTooltips(); IXLPivotTable SetShowContextualTooltips(Boolean value);
+
         IXLPivotTable SetShowPropertiesInTooltips(); IXLPivotTable SetShowPropertiesInTooltips(Boolean value);
+
         IXLPivotTable SetDisplayCaptionsAndDropdowns(); IXLPivotTable SetDisplayCaptionsAndDropdowns(Boolean value);
+
         IXLPivotTable SetClassicPivotTableLayout(); IXLPivotTable SetClassicPivotTableLayout(Boolean value);
+
         IXLPivotTable SetShowValuesRow(); IXLPivotTable SetShowValuesRow(Boolean value);
+
         IXLPivotTable SetShowEmptyItemsOnRows(); IXLPivotTable SetShowEmptyItemsOnRows(Boolean value);
+
         IXLPivotTable SetShowEmptyItemsOnColumns(); IXLPivotTable SetShowEmptyItemsOnColumns(Boolean value);
+
         IXLPivotTable SetDisplayItemLabels(); IXLPivotTable SetDisplayItemLabels(Boolean value);
+
         IXLPivotTable SetSortFieldsAtoZ(); IXLPivotTable SetSortFieldsAtoZ(Boolean value);
 
         IXLPivotTable SetPrintExpandCollapsedButtons(); IXLPivotTable SetPrintExpandCollapsedButtons(Boolean value);
+
         IXLPivotTable SetRepeatRowLabels(); IXLPivotTable SetRepeatRowLabels(Boolean value);
+
         IXLPivotTable SetPrintTitles(); IXLPivotTable SetPrintTitles(Boolean value);
 
         IXLPivotTable SetSaveSourceData(); IXLPivotTable SetSaveSourceData(Boolean value);
+
         IXLPivotTable SetEnableShowDetails(); IXLPivotTable SetEnableShowDetails(Boolean value);
+
         IXLPivotTable SetRefreshDataOnOpen(); IXLPivotTable SetRefreshDataOnOpen(Boolean value);
+
         IXLPivotTable SetItemsToRetainPerField(XLItemsToRetain value);
+
         IXLPivotTable SetEnableCellEditing(); IXLPivotTable SetEnableCellEditing(Boolean value);
+
+        IXLPivotTable SetColumnHeaderCaption(String value);
+
+        IXLPivotTable SetRowHeaderCaption(String value);
 
         Boolean ShowRowHeaders { get; set; }
         Boolean ShowColumnHeaders { get; set; }
@@ -202,12 +254,21 @@ namespace ClosedXML.Excel
         Boolean InsertBlankLines { set; }
 
         IXLPivotTable SetShowRowHeaders(); IXLPivotTable SetShowRowHeaders(Boolean value);
+
         IXLPivotTable SetShowColumnHeaders(); IXLPivotTable SetShowColumnHeaders(Boolean value);
+
         IXLPivotTable SetShowRowStripes(); IXLPivotTable SetShowRowStripes(Boolean value);
+
         IXLPivotTable SetShowColumnStripes(); IXLPivotTable SetShowColumnStripes(Boolean value);
+
         IXLPivotTable SetSubtotals(XLPivotSubtotals value);
+
         IXLPivotTable SetLayout(XLPivotLayout value);
+
         IXLPivotTable SetInsertBlankLines(); IXLPivotTable SetInsertBlankLines(Boolean value);
 
+        IXLWorksheet Worksheet { get; }
+
+        IXLPivotTableStyleFormats StyleFormats { get; }
     }
 }

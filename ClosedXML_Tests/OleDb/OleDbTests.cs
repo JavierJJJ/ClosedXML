@@ -1,4 +1,6 @@
-﻿using ClosedXML.Excel;
+﻿#if !APPVEYOR && _NETFRAMEWORK_
+using ClosedXML.Excel;
+using ClosedXML_Tests.Utils;
 using NUnit.Framework;
 using System;
 using System.Collections.Generic;
@@ -12,11 +14,10 @@ namespace ClosedXML_Tests.OleDb
     [TestFixture]
     public class OleDbTests
     {
-#if !APPVEYOR
         [Test]
         public void TestOleDbValues()
         {
-            using (var tf = new TestFile(CreateTestFile()))
+            using (var tf = new TemporaryFile(CreateTestFile()))
             {
                 Console.Write("Using temporary file\t{0}", tf.Path);
                 var connectionString = string.Format(@"Provider=Microsoft.ACE.OLEDB.12.0;Data Source={0};Extended Properties='Excel 12.0 Xml;HDR=YES;IMEX=1';", tf.Path);
@@ -38,10 +39,10 @@ namespace ClosedXML_Tests.OleDb
                         Assert.AreEqual(2, dt.Rows.Count);
 
                         Assert.AreEqual(42, dt.Rows.Cast<DataRow>().First()[0]);
-                        Assert.AreEqual("42", dt.Rows.Cast<DataRow>().First()[1]);
+                        Assert.AreEqual(42, dt.Rows.Cast<DataRow>().First()[1]);
 
                         Assert.AreEqual(41, dt.Rows.Cast<DataRow>().Last()[0]);
-                        Assert.AreEqual("41", dt.Rows.Cast<DataRow>().Last()[1]);
+                        Assert.AreEqual(41, dt.Rows.Cast<DataRow>().Last()[1]);
                     }
 
                     using (var command = new OleDbCommand("select * from [Sheet2$]", connection))
@@ -56,12 +57,12 @@ namespace ClosedXML_Tests.OleDb
                         Assert.AreEqual("Sum", dt.Columns[2].ColumnName);
                         Assert.AreEqual("SumRef", dt.Columns[3].ColumnName);
 
-                        var expected = new Dictionary<string, string>()
+                        var expected = new Dictionary<string, double>()
                         {
-                            {"Ref1", "42" },
-                            {"Ref2", "41" },
-                            {"Sum", "83" },
-                            {"SumRef", "83" },
+                            {"Ref1", 42 },
+                            {"Ref2", 41 },
+                            {"Sum", 83 },
+                            {"SumRef", 83 },
                         };
 
                         foreach (var col in dt.Columns.Cast<DataColumn>())
@@ -77,7 +78,6 @@ namespace ClosedXML_Tests.OleDb
                 }
             }
         }
-#endif
 
         private string CreateTestFile()
         {
@@ -115,32 +115,6 @@ namespace ClosedXML_Tests.OleDb
                 return path;
             }
         }
-
-        internal class TestFile : IDisposable
-        {
-            internal TestFile(string path)
-                : this(path, false)
-            { }
-
-            internal TestFile(string path, bool preserve)
-            {
-                this.Path = path;
-                this.Preserve = preserve;
-            }
-
-            public string Path { get; private set; }
-            public bool Preserve { get; private set; }
-
-            public void Dispose()
-            {
-                if (!Preserve)
-                    File.Delete(Path);
-            }
-
-            public override string ToString()
-            {
-                return this.Path;
-            }
-        }
     }
 }
+#endif

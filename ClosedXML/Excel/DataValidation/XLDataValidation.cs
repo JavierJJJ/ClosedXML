@@ -1,21 +1,37 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace ClosedXML.Excel
 {
     internal class XLDataValidation : IXLDataValidation
     {
-        public XLDataValidation(IXLRanges ranges)
+        private readonly XLWorksheet _worksheet;
+        private readonly XLRanges _ranges;
+
+        internal XLWorksheet Worksheet => _worksheet;
+
+
+        private XLDataValidation(XLWorksheet worksheet)
         {
-            
-            Ranges = new XLRanges();
-            ranges.ForEach(r=>
-                               {
-                                   var newR =
-                                       new XLRange(new XLRangeParameters(r.RangeAddress as XLRangeAddress,
-                                                                         r.Worksheet.Style) {IgnoreEvents = true});
-                                   (Ranges as XLRanges).Add(newR);
-                               } );
+            _worksheet = worksheet ?? throw new ArgumentNullException(nameof(worksheet));
+            _ranges = new XLRanges();
             Initialize();
+        }
+
+        public XLDataValidation(IXLRange range)
+            : this(range?.Worksheet as XLWorksheet)
+        {
+            if (range == null) throw new ArgumentNullException(nameof(range));
+
+            AddRange(range);
+        }
+
+        public XLDataValidation(IXLDataValidation dataValidation, XLWorksheet worksheet)
+            : this(worksheet)
+        {
+            _worksheet = worksheet;
+            CopyFrom(dataValidation);
         }
 
         private void Initialize()
@@ -41,21 +57,81 @@ namespace ClosedXML.Excel
             return
                 AllowedValues != XLAllowedValues.AnyValue
                 || (ShowInputMessage &&
-                  (!XLHelper.IsNullOrWhiteSpace(InputTitle) || !XLHelper.IsNullOrWhiteSpace(InputMessage)))
-                ||(ShowErrorMessage &&
-                  (!XLHelper.IsNullOrWhiteSpace(ErrorTitle) || !XLHelper.IsNullOrWhiteSpace(ErrorMessage)));
-
-        }
-
-        public XLDataValidation(IXLDataValidation dataValidation)
-        {
-            CopyFrom(dataValidation);
+                   (!String.IsNullOrWhiteSpace(InputTitle) || !String.IsNullOrWhiteSpace(InputMessage)))
+                || (ShowErrorMessage &&
+                   (!String.IsNullOrWhiteSpace(ErrorTitle) || !String.IsNullOrWhiteSpace(ErrorMessage)));
         }
 
         #region IXLDataValidation Members
 
-        public IXLRanges Ranges { get; set; }
+        public IEnumerable<IXLRange> Ranges => _ranges.AsEnumerable();
 
+        /// <summary>
+        /// Add a range to the collection of ranges this rule applies to.
+        /// If the specified range does not belong to the worksheet of the data validation
+        /// rule it is transferred to the target worksheet.
+        /// </summary>
+        /// <param name="range">A range to add.</param>
+        public void AddRange(IXLRange range)
+        {
+            if (range == null) throw new ArgumentNullException(nameof(range));
+
+            if (range.Worksheet != Worksheet)
+                range = Worksheet.Range(((XLRangeAddress) range.RangeAddress).WithoutWorksheet());
+
+            _ranges.Add(range);
+
+            RangeAdded?.Invoke(this, new RangeEventArgs(range));
+        }
+
+        /// <summary>
+        /// Add a collection of ranges to the collection of ranges this rule applies to.
+        /// Ranges that do not belong to the worksheet of the data validation
+        /// rule are transferred to the target worksheet.
+        /// </summary>
+        /// <param name="ranges">Ranges to add.</param>
+        public void AddRanges(IEnumerable<IXLRange> ranges)
+        {
+            ranges = ranges ?? Enumerable.Empty<IXLRange>();
+
+            foreach (var range in ranges)
+            {
+                AddRange(range);
+            }
+        }
+
+        /// <summary>
+        /// Detach data validation rule of all ranges it applies to.
+        /// </summary>
+        public void ClearRanges()
+        {
+            var allRanges = _ranges.ToList();
+            _ranges.RemoveAll();
+
+            foreach (var range in allRanges)
+            {
+                RangeRemoved?.Invoke(this, new RangeEventArgs(range));
+            }
+        }
+
+        /// <summary>
+        /// Remove the specified range from the collection of range this rule applies to.
+        /// </summary>
+        /// <param name="range">A range to remove.</param>
+        public bool RemoveRange(IXLRange range)
+        {
+            if (range == null)
+                return false;
+
+            var res = _ranges.Remove(range);
+
+            if (res)
+            {
+                RangeRemoved?.Invoke(this, new RangeEventArgs(range));
+            }
+
+            return res;
+        }
 
         public Boolean IgnoreBlanks { get; set; }
         public Boolean InCellDropdown { get; set; }
@@ -66,13 +142,7 @@ namespace ClosedXML.Excel
         public String ErrorTitle { get; set; }
         public String ErrorMessage { get; set; }
         public XLErrorStyle ErrorStyle { get; set; }
-        private XLAllowedValues _allowedValues;
-        public XLAllowedValues AllowedValues
-        {
-            get { return _allowedValues; }
-            set { _allowedValues = value; }
-        }
-        
+        public XLAllowedValues AllowedValues { get; set; }
         public XLOperator Operator { get; set; }
 
         public String Value
@@ -81,8 +151,11 @@ namespace ClosedXML.Excel
             set { MinValue = value; }
         }
 
-        public String MinValue { get; set; }
-        public String MaxValue { get; set; }
+        private String minValue;
+        public String MinValue { get => minValue; set { Validate(value); minValue = value; } }
+
+        private String maxValue;
+        public String MaxValue { get => maxValue; set { Validate(value); maxValue = value; } }
 
         public XLWholeNumberCriteria WholeNumber
         {
@@ -157,18 +230,14 @@ namespace ClosedXML.Excel
             Value = customValidation;
         }
 
-        #endregion
+        #endregion IXLDataValidation Members
 
         public void CopyFrom(IXLDataValidation dataValidation)
         {
             if (dataValidation == this) return;
 
-            if (Ranges == null && dataValidation.Ranges != null)
-            {
-                Ranges = new XLRanges();
-                dataValidation.Ranges.ForEach(r => Ranges.Add(r));
-            }
-
+            if (!_ranges.Any())
+                AddRanges(dataValidation.Ranges);
 
             IgnoreBlanks = dataValidation.IgnoreBlanks;
             InCellDropdown = dataValidation.InCellDropdown;
@@ -183,12 +252,43 @@ namespace ClosedXML.Excel
             Operator = dataValidation.Operator;
             MinValue = dataValidation.MinValue;
             MaxValue = dataValidation.MaxValue;
-
         }
 
         public void Clear()
         {
             Initialize();
         }
+
+        private void Validate(String value)
+        {
+            if (value.Length > 255)
+                throw new ArgumentOutOfRangeException(nameof(value), "The maximum allowed length of the value is 255 characters.");
+        }
+
+        internal event EventHandler<RangeEventArgs> RangeAdded;
+
+        internal event EventHandler<RangeEventArgs> RangeRemoved;
+
+        internal void SplitBy(IXLRangeAddress rangeAddress)
+        {
+            var rangesToSplit = _ranges.GetIntersectedRanges(rangeAddress).ToList();
+
+            foreach (var rangeToSplit in rangesToSplit)
+            {
+                var newRanges = (rangeToSplit as XLRange).Split(rangeAddress, includeIntersection: false);
+                RemoveRange(rangeToSplit);
+                newRanges.ForEach(AddRange);
+            }
+        }
+    }
+
+    internal class RangeEventArgs : EventArgs
+    {
+        public RangeEventArgs(IXLRange range)
+        {
+            Range = range ?? throw new ArgumentNullException(nameof(range));
+        }
+
+        public IXLRange Range { get; }
     }
 }

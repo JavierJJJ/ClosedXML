@@ -6,11 +6,36 @@ namespace ClosedXML.Excel
 {
     using System.Collections;
 
-    public class XLTables : IXLTables
+    internal class XLTables : IXLTables
     {
-        private readonly Dictionary<String, IXLTable> _tables = new Dictionary<String, IXLTable>();
+        private readonly Dictionary<String, IXLTable> _tables;
+
+        public XLTables()
+        {
+            _tables = new Dictionary<String, IXLTable>(StringComparer.OrdinalIgnoreCase);
+            Deleted = new HashSet<String>();
+        }
+
+        internal ICollection<String> Deleted { get; private set; }
 
         #region IXLTables Members
+
+        public void Add(IXLTable table)
+        {
+            _tables.Add(table.Name, table);
+            (table as XLTable)?.OnAddedToTables();
+        }
+
+        public IXLTables Clear(XLClearOptions clearOptions = XLClearOptions.All)
+        {
+            _tables.Values.ForEach(t => t.Clear(clearOptions));
+            return this;
+        }
+
+        public Boolean Contains(String name)
+        {
+            return _tables.ContainsKey(name);
+        }
 
         public IEnumerator<IXLTable> GetEnumerator()
         {
@@ -22,9 +47,22 @@ namespace ClosedXML.Excel
             return GetEnumerator();
         }
 
-        public void Add(IXLTable table)
+        public void Remove(Int32 index)
         {
-            _tables.Add(table.Name, table);
+            this.Remove(_tables.ElementAt(index).Key);
+        }
+
+        public void Remove(String name)
+        {
+            if (!_tables.TryGetValue(name, out IXLTable table))
+                throw new ArgumentOutOfRangeException(nameof(name), $"Unable to delete table because the table name {name} could not be found.");
+
+            _tables.Remove(name);
+
+            var relId = (table as XLTable)?.RelId;
+
+            if (relId != null)
+                Deleted.Add(relId);
         }
 
         public IXLTable Table(Int32 index)
@@ -34,24 +72,17 @@ namespace ClosedXML.Excel
 
         public IXLTable Table(String name)
         {
-            return _tables[name];
+            if (TryGetTable(name, out IXLTable table))
+                return table;
+
+            throw new ArgumentOutOfRangeException(nameof(name), $"Table {name} was not found.");
         }
 
-        #endregion
-
-        public IXLTables Clear(XLClearOptions clearOptions = XLClearOptions.ContentsAndFormats)
+        public bool TryGetTable(string tableName, out IXLTable table)
         {
-            _tables.Values.ForEach(t => t.Clear(clearOptions));
-            return this;
+            return _tables.TryGetValue(tableName, out table);
         }
 
-        public void Remove(Int32 index)
-        {
-            _tables.Remove(_tables.ElementAt(index).Key);
-        }
-        public void Remove(String name)
-        {
-            _tables.Remove(name);
-        }
+        #endregion IXLTables Members
     }
 }

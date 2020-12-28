@@ -1,36 +1,38 @@
+using ClosedXML.Excel.Caching;
 using ClosedXML.Excel.CalcEngine;
 using ClosedXML.Excel.Drawings;
-using ClosedXML.Excel.Misc;
-using ClosedXML.Extensions;
+using ClosedXML.Excel.Ranges.Index;
 using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.IO;
 using System.Linq;
-using System.Text;
+using static ClosedXML.Excel.XLProtectionAlgorithm;
 
 namespace ClosedXML.Excel
 {
     internal class XLWorksheet : XLRangeBase, IXLWorksheet
     {
-        #region Events
-
-        public XLReentrantEnumerableSet<XLCallbackAction> RangeShiftedRows;
-        public XLReentrantEnumerableSet<XLCallbackAction> RangeShiftedColumns;
-
-        #endregion Events
-
         #region Fields
 
         private readonly Dictionary<Int32, Int32> _columnOutlineCount = new Dictionary<Int32, Int32>();
         private readonly Dictionary<Int32, Int32> _rowOutlineCount = new Dictionary<Int32, Int32>();
+        private readonly XLRangeFactory _rangeFactory;
+        private readonly XLRangeRepository _rangeRepository;
+        private readonly List<IXLRangeIndex> _rangeIndices;
         internal Int32 ZOrder = 1;
         private String _name;
         internal Int32 _position;
 
         private Double _rowHeight;
         private Boolean _tabActive;
+        private XLSheetProtection _protection;
         internal Boolean EventTrackingEnabled;
+
+        /// <summary>
+        /// Fake address to be used everywhere the invalid address is needed.
+        /// </summary>
+        internal readonly XLAddress InvalidAddress;
 
         #endregion Fields
 
@@ -40,30 +42,34 @@ namespace ClosedXML.Excel
             : base(
                 new XLRangeAddress(
                     new XLAddress(null, XLHelper.MinRowNumber, XLHelper.MinColumnNumber, false, false),
-                    new XLAddress(null, XLHelper.MaxRowNumber, XLHelper.MaxColumnNumber, false, false)))
+                    new XLAddress(null, XLHelper.MaxRowNumber, XLHelper.MaxColumnNumber, false, false)),
+                (workbook.Style as XLStyle).Value)
         {
             EventTrackingEnabled = workbook.EventTracking == XLEventTracking.Enabled;
 
             Workbook = workbook;
+            InvalidAddress = new XLAddress(this, 0, 0, false, false);
 
-            RangeShiftedRows = new XLReentrantEnumerableSet<XLCallbackAction>();
-            RangeShiftedColumns = new XLReentrantEnumerableSet<XLCallbackAction>();
-
-            RangeAddress.Worksheet = this;
-            RangeAddress.FirstAddress.Worksheet = this;
-            RangeAddress.LastAddress.Worksheet = this;
+            var firstAddress = new XLAddress(this, RangeAddress.FirstAddress.RowNumber, RangeAddress.FirstAddress.ColumnNumber,
+                                                   RangeAddress.FirstAddress.FixedRow, RangeAddress.FirstAddress.FixedColumn);
+            var lastAddress = new XLAddress(this, RangeAddress.LastAddress.RowNumber, RangeAddress.LastAddress.ColumnNumber,
+                                                  RangeAddress.LastAddress.FixedRow, RangeAddress.LastAddress.FixedColumn);
+            RangeAddress = new XLRangeAddress(firstAddress, lastAddress);
+            _rangeFactory = new XLRangeFactory(this);
+            _rangeRepository = new XLRangeRepository(workbook, _rangeFactory.Create);
+            _rangeIndices = new List<IXLRangeIndex>();
 
             Pictures = new XLPictures(this);
             NamedRanges = new XLNamedRanges(this);
-            SheetView = new XLSheetView();
+            SheetView = new XLSheetView(this);
             Tables = new XLTables();
             Hyperlinks = new XLHyperlinks();
-            DataValidations = new XLDataValidations();
-            PivotTables = new XLPivotTables();
-            Protection = new XLSheetProtection();
+            DataValidations = new XLDataValidations(this);
+            PivotTables = new XLPivotTables(this);
+            Protection = new XLSheetProtection(DefaultProtectionAlgorithm);
             AutoFilter = new XLAutoFilter();
             ConditionalFormats = new XLConditionalFormats();
-            SetStyle(workbook.Style);
+            SparklineGroups = new XLSparklineGroups(this);
             Internals = new XLWorksheetInternals(new XLCellsCollection(), new XLColumnsCollection(),
                                                  new XLRowsCollection(), new XLRanges());
             PageSetup = new XLPageSetup((XLPageSetup)workbook.PageOptions, this);
@@ -72,8 +78,6 @@ namespace ClosedXML.Excel
             _rowHeight = workbook.RowHeight;
             RowHeightChanged = Math.Abs(workbook.RowHeight - XLWorkbook.DefaultRowHeight) > XLHelper.Epsilon;
             Name = sheetName;
-            SubscribeToShiftedRows((range, rowsShifted) => this.WorksheetRangeShiftedRows(range, rowsShifted));
-            SubscribeToShiftedColumns((range, columnsShifted) => this.WorksheetRangeShiftedColumns(range, columnsShifted));
             Charts = new XLCharts();
             ShowFormulas = workbook.ShowFormulas;
             ShowGridLines = workbook.ShowGridLines;
@@ -91,61 +95,85 @@ namespace ClosedXML.Excel
 
         #endregion Constructor
 
+        public override XLRangeType RangeType
+        {
+            get { return XLRangeType.Worksheet; }
+        }
+
         //private IXLStyle _style;
         private const String InvalidNameChars = @":\/?*[]";
 
         public string LegacyDrawingId;
         public Boolean LegacyDrawingIsNew;
         private Double _columnWidth;
+
         public XLWorksheetInternals Internals { get; private set; }
+
+        public XLRangeFactory RangeFactory
+        {
+            get { return _rangeFactory; }
+        }
 
         public override IEnumerable<IXLStyle> Styles
         {
             get
             {
-                UpdatingStyle = true;
                 yield return GetStyle();
                 foreach (XLCell c in Internals.CellsCollection.GetCells())
                     yield return c.Style;
-                UpdatingStyle = false;
             }
         }
 
-        public override Boolean UpdatingStyle { get; set; }
-
-        public override IXLStyle InnerStyle
+        protected override IEnumerable<XLStylizedBase> Children
         {
-            get { return GetStyle(); }
-            set { SetStyle(value); }
+            get
+            {
+                var columnsUsed = Internals.ColumnsCollection.Keys
+                    .Union(Internals.CellsCollection.ColumnsUsed.Keys)
+                    .Distinct()
+                    .OrderBy(c => c)
+                    .ToList();
+                foreach (var col in columnsUsed)
+                    yield return Column(col);
+
+                var rowsUsed = Internals.RowsCollection.Keys
+                    .Union(Internals.CellsCollection.RowsUsed.Keys)
+                    .Distinct()
+                    .OrderBy(r => r)
+                    .ToList();
+                foreach (var row in rowsUsed)
+                    yield return Row(row);
+            }
         }
 
         internal Boolean RowHeightChanged { get; set; }
+
         internal Boolean ColumnWidthChanged { get; set; }
 
         public Int32 SheetId { get; set; }
+
         internal String RelId { get; set; }
+
         public XLDataValidations DataValidations { get; private set; }
+
         public IXLCharts Charts { get; private set; }
-        public XLSheetProtection Protection { get; private set; }
+
+        public XLSheetProtection Protection
+        {
+            get => _protection;
+            set
+            {
+                _protection = value.Clone().CastTo<XLSheetProtection>();
+            }
+        }
+
         public XLAutoFilter AutoFilter { get; private set; }
+
+        public bool IsDeleted { get; private set; }
 
         #region IXLWorksheet Members
 
         public XLWorkbook Workbook { get; private set; }
-
-        public override IXLStyle Style
-        {
-            get
-            {
-                return GetStyle();
-            }
-            set
-            {
-                SetStyle(value);
-                foreach (XLCell cell in Internals.CellsCollection.GetCells())
-                    cell.Style = value;
-            }
-        }
 
         public Double ColumnWidth
         {
@@ -172,15 +200,23 @@ namespace ClosedXML.Excel
             get { return _name; }
             set
             {
+                if (_name == value) return;
+
+                if (String.IsNullOrWhiteSpace(value))
+                    throw new ArgumentException("Worksheet names cannot be empty");
+
                 if (value.IndexOfAny(InvalidNameChars.ToCharArray()) != -1)
                     throw new ArgumentException("Worksheet names cannot contain any of the following characters: " +
                                                 InvalidNameChars);
 
-                if (XLHelper.IsNullOrWhiteSpace(value))
-                    throw new ArgumentException("Worksheet names cannot be empty");
-
                 if (value.Length > 31)
                     throw new ArgumentException("Worksheet names cannot be more than 31 characters");
+
+                if (value.StartsWith("'", StringComparison.Ordinal))
+                    throw new ArgumentException("Worksheet names cannot start with an apostrophe");
+
+                if (value.EndsWith("'", StringComparison.Ordinal))
+                    throw new ArgumentException("Worksheet names cannot end with an apostrophe");
 
                 Workbook.WorksheetsInternal.Rename(_name, value);
                 _name = value;
@@ -193,7 +229,7 @@ namespace ClosedXML.Excel
             set
             {
                 if (value > Workbook.WorksheetsInternal.Count + Workbook.UnsupportedSheets.Count + 1)
-                    throw new IndexOutOfRangeException("Index must be equal or less than the number of worksheets + 1.");
+                    throw new ArgumentOutOfRangeException(nameof(value), "Index must be equal or less than the number of worksheets + 1.");
 
                 if (value < _position)
                 {
@@ -214,6 +250,7 @@ namespace ClosedXML.Excel
         }
 
         public IXLPageSetup PageSetup { get; private set; }
+
         public IXLOutline Outline { get; private set; }
 
         IXLRow IXLWorksheet.FirstRowUsed()
@@ -221,9 +258,17 @@ namespace ClosedXML.Excel
             return FirstRowUsed();
         }
 
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLRow IXLWorksheet.FirstRowUsed(Boolean includeFormats)
         {
-            return FirstRowUsed(includeFormats);
+            return FirstRowUsed(includeFormats
+                ? XLCellsUsedOptions.All
+                : XLCellsUsedOptions.AllContents);
+        }
+
+        IXLRow IXLWorksheet.FirstRowUsed(XLCellsUsedOptions options)
+        {
+            return FirstRowUsed(options);
         }
 
         IXLRow IXLWorksheet.LastRowUsed()
@@ -231,9 +276,17 @@ namespace ClosedXML.Excel
             return LastRowUsed();
         }
 
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLRow IXLWorksheet.LastRowUsed(Boolean includeFormats)
         {
-            return LastRowUsed(includeFormats);
+            return LastRowUsed(includeFormats
+                ? XLCellsUsedOptions.All
+                : XLCellsUsedOptions.AllContents);
+        }
+
+        IXLRow IXLWorksheet.LastRowUsed(XLCellsUsedOptions options)
+        {
+            return LastRowUsed(options);
         }
 
         IXLColumn IXLWorksheet.LastColumn()
@@ -261,9 +314,17 @@ namespace ClosedXML.Excel
             return FirstColumnUsed();
         }
 
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLColumn IXLWorksheet.FirstColumnUsed(Boolean includeFormats)
         {
-            return FirstColumnUsed(includeFormats);
+            return FirstColumnUsed(includeFormats
+                ? XLCellsUsedOptions.All
+                : XLCellsUsedOptions.AllContents);
+        }
+
+        IXLColumn IXLWorksheet.FirstColumnUsed(XLCellsUsedOptions options)
+        {
+            return FirstColumnUsed(options);
         }
 
         IXLColumn IXLWorksheet.LastColumnUsed()
@@ -271,14 +332,22 @@ namespace ClosedXML.Excel
             return LastColumnUsed();
         }
 
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
         IXLColumn IXLWorksheet.LastColumnUsed(Boolean includeFormats)
         {
-            return LastColumnUsed(includeFormats);
+            return LastColumnUsed(includeFormats
+                ? XLCellsUsedOptions.All
+                : XLCellsUsedOptions.AllContents);
+        }
+
+        IXLColumn IXLWorksheet.LastColumnUsed(XLCellsUsedOptions options)
+        {
+            return LastColumnUsed(options);
         }
 
         public IXLColumns Columns()
         {
-            var retVal = new XLColumns(this);
+            var retVal = new XLColumns(this, StyleValue);
             var columnList = new List<Int32>();
 
             if (Internals.CellsCollection.Count > 0)
@@ -295,7 +364,7 @@ namespace ClosedXML.Excel
 
         public IXLColumns Columns(String columns)
         {
-            var retVal = new XLColumns(null);
+            var retVal = new XLColumns(null, StyleValue);
             var columnPairs = columns.Split(',');
             foreach (string tPair in columnPairs.Select(pair => pair.Trim()))
             {
@@ -313,8 +382,7 @@ namespace ClosedXML.Excel
                     lastColumn = tPair;
                 }
 
-                Int32 tmp;
-                if (Int32.TryParse(firstColumn, out tmp))
+                if (Int32.TryParse(firstColumn, out int tmp))
                 {
                     foreach (IXLColumn col in Columns(Int32.Parse(firstColumn), Int32.Parse(lastColumn)))
                         retVal.Add((XLColumn)col);
@@ -336,7 +404,7 @@ namespace ClosedXML.Excel
 
         public IXLColumns Columns(Int32 firstColumn, Int32 lastColumn)
         {
-            var retVal = new XLColumns(null);
+            var retVal = new XLColumns(null, StyleValue);
 
             for (int co = firstColumn; co <= lastColumn; co++)
                 retVal.Add(Column(co));
@@ -345,7 +413,7 @@ namespace ClosedXML.Excel
 
         public IXLRows Rows()
         {
-            var retVal = new XLRows(this);
+            var retVal = new XLRows(this, StyleValue);
             var rowList = new List<Int32>();
 
             if (Internals.CellsCollection.Count > 0)
@@ -362,7 +430,7 @@ namespace ClosedXML.Excel
 
         public IXLRows Rows(String rows)
         {
-            var retVal = new XLRows(null);
+            var retVal = new XLRows(null, StyleValue);
             var rowPairs = rows.Split(',');
             foreach (string tPair in rowPairs.Select(pair => pair.Trim()))
             {
@@ -379,15 +447,16 @@ namespace ClosedXML.Excel
                     firstRow = tPair;
                     lastRow = tPair;
                 }
-                foreach (IXLRow row in Rows(Int32.Parse(firstRow), Int32.Parse(lastRow)))
-                    retVal.Add((XLRow)row);
+
+                Rows(Int32.Parse(firstRow), Int32.Parse(lastRow))
+                    .ForEach(row => retVal.Add((XLRow)row));
             }
             return retVal;
         }
 
         public IXLRows Rows(Int32 firstRow, Int32 lastRow)
         {
-            var retVal = new XLRows(null);
+            var retVal = new XLRows(null, StyleValue);
 
             for (int ro = firstRow; ro <= lastRow; ro++)
                 retVal.Add(Row(ro));
@@ -479,7 +548,7 @@ namespace ClosedXML.Excel
 
         public IXLWorksheet ExpandColumns()
         {
-            Enumerable.Range(1, 8).ForEach(i => ExpandRows(i));
+            Enumerable.Range(1, 8).ForEach(i => ExpandColumns(i));
             return this;
         }
 
@@ -521,6 +590,8 @@ namespace ClosedXML.Excel
 
         public void Delete()
         {
+            IsDeleted = true;
+            (Workbook.NamedRanges as XLNamedRanges).OnWorksheetDeleted(Name);
             Workbook.WorksheetsInternal.Delete(Name);
         }
 
@@ -531,7 +602,10 @@ namespace ClosedXML.Excel
             return NamedRanges.NamedRange(rangeName);
         }
 
-        public IXLSheetView SheetView { get; private set; }
+        IXLSheetView IXLWorksheet.SheetView { get => SheetView; }
+
+        public XLSheetView SheetView { get; private set; }
+
         public IXLTables Tables { get; private set; }
 
         public IXLTable Table(Int32 index)
@@ -561,120 +635,42 @@ namespace ClosedXML.Excel
 
         public IXLWorksheet CopyTo(XLWorkbook workbook, String newSheetName, Int32 position)
         {
+            if (this.IsDeleted)
+                throw new InvalidOperationException($"`{this.Name}` has been deleted and cannot be copied.");
+
             var targetSheet = (XLWorksheet)workbook.WorksheetsInternal.Add(newSheetName, position);
-            Internals.ColumnsCollection.ForEach(kp => targetSheet.Internals.ColumnsCollection.Add(kp.Key, new XLColumn(kp.Value)));
-            Internals.RowsCollection.ForEach(kp => targetSheet.Internals.RowsCollection.Add(kp.Key, new XLRow(kp.Value)));
-            Internals.CellsCollection.GetCells().ForEach(c => targetSheet.Cell(c.Address).CopyFrom(c, false));
-            DataValidations.ForEach(dv => targetSheet.DataValidations.Add(new XLDataValidation(dv)));
+            Internals.ColumnsCollection.ForEach(kp => kp.Value.CopyTo(targetSheet.Column(kp.Key)));
+            Internals.RowsCollection.ForEach(kp => kp.Value.CopyTo(targetSheet.Row(kp.Key)));
+            Internals.CellsCollection.GetCells().ForEach(c => targetSheet.Cell(c.Address).CopyFrom(c, XLCellCopyOptions.Values | XLCellCopyOptions.Styles));
+            DataValidations.ForEach(dv => targetSheet.DataValidations.Add(new XLDataValidation(dv, this)));
             targetSheet.Visibility = Visibility;
             targetSheet.ColumnWidth = ColumnWidth;
             targetSheet.ColumnWidthChanged = ColumnWidthChanged;
             targetSheet.RowHeight = RowHeight;
             targetSheet.RowHeightChanged = RowHeightChanged;
-            targetSheet.SetStyle(Style);
+            targetSheet.InnerStyle = InnerStyle;
             targetSheet.PageSetup = new XLPageSetup((XLPageSetup)PageSetup, targetSheet);
             (targetSheet.PageSetup.Header as XLHeaderFooter).Changed = true;
             (targetSheet.PageSetup.Footer as XLHeaderFooter).Changed = true;
             targetSheet.Outline = new XLOutline(Outline);
-            targetSheet.SheetView = new XLSheetView(SheetView);
-            Internals.MergedRanges.ForEach(
-                kp => targetSheet.Internals.MergedRanges.Add(targetSheet.Range(kp.RangeAddress.ToString())));
+            targetSheet.SheetView = new XLSheetView(targetSheet, SheetView);
+            targetSheet.SelectedRanges.RemoveAll();
 
-            foreach (var picture in Pictures)
+            Pictures.ForEach(picture => picture.CopyTo(targetSheet));
+            NamedRanges.ForEach(nr => nr.CopyTo(targetSheet));
+            Tables.Cast<XLTable>().ForEach(t => t.CopyTo(targetSheet, false));
+            ConditionalFormats.ForEach(cf => cf.CopyTo(targetSheet));
+            SparklineGroups.CopyTo(targetSheet);
+            MergedRanges.ForEach(mr => targetSheet.Range(((XLRangeAddress)mr.RangeAddress).WithoutWorksheet()).Merge());
+            SelectedRanges.ForEach(sr => targetSheet.SelectedRanges.Add(targetSheet.Range(((XLRangeAddress)sr.RangeAddress).WithoutWorksheet())));
+
+            if (AutoFilter.IsEnabled)
             {
-                var newPic = targetSheet.AddPicture(picture.ImageStream, picture.Format, picture.Name)
-                    .WithPlacement(picture.Placement)
-                    .WithSize(picture.Width, picture.Height);
-
-                switch (picture.Placement)
-                {
-                    case XLPicturePlacement.FreeFloating:
-                        newPic.MoveTo(picture.Left, picture.Top);
-                        break;
-
-                    case XLPicturePlacement.Move:
-                        var newAddress = new XLAddress(targetSheet, picture.TopLeftCellAddress.RowNumber, picture.TopLeftCellAddress.ColumnNumber, false, false);
-                        newPic.MoveTo(newAddress, picture.GetOffset(XLMarkerPosition.TopLeft));
-                        break;
-
-                    case XLPicturePlacement.MoveAndSize:
-                        var newFromAddress = new XLAddress(targetSheet, picture.TopLeftCellAddress.RowNumber, picture.TopLeftCellAddress.ColumnNumber, false, false);
-                        var newToAddress = new XLAddress(targetSheet, picture.BottomRightCellAddress.RowNumber, picture.BottomRightCellAddress.ColumnNumber, false, false);
-
-                        newPic.MoveTo(newFromAddress, picture.GetOffset(XLMarkerPosition.TopLeft), newToAddress, picture.GetOffset(XLMarkerPosition.BottomRight));
-                        break;
-                }
+                var range = targetSheet.Range(((XLRangeAddress)AutoFilter.Range.RangeAddress).WithoutWorksheet());
+                range.SetAutoFilter();
             }
-
-            foreach (IXLNamedRange r in NamedRanges)
-            {
-                var ranges = new XLRanges();
-                r.Ranges.ForEach(ranges.Add);
-                targetSheet.NamedRanges.Add(r.Name, ranges);
-            }
-
-            foreach (XLTable t in Tables.Cast<XLTable>())
-            {
-                String tableName = t.Name;
-                var table = targetSheet.Tables.Any(tt => tt.Name == tableName)
-                                ? new XLTable(targetSheet.Range(t.RangeAddress.ToString()), true)
-                                : new XLTable(targetSheet.Range(t.RangeAddress.ToString()), tableName, true);
-
-                table.RelId = t.RelId;
-                table.EmphasizeFirstColumn = t.EmphasizeFirstColumn;
-                table.EmphasizeLastColumn = t.EmphasizeLastColumn;
-                table.ShowRowStripes = t.ShowRowStripes;
-                table.ShowColumnStripes = t.ShowColumnStripes;
-                table.ShowAutoFilter = t.ShowAutoFilter;
-                table.Theme = t.Theme;
-                table._showTotalsRow = t.ShowTotalsRow;
-                table._uniqueNames.Clear();
-
-                t._uniqueNames.ForEach(n => table._uniqueNames.Add(n));
-                Int32 fieldCount = t.ColumnCount();
-                for (Int32 f = 0; f < fieldCount; f++)
-                {
-                    var tableField = table.Field(f) as XLTableField;
-                    var tField = t.Field(f) as XLTableField;
-                    tableField.Index = tField.Index;
-                    tableField.Name = tField.Name;
-                    tableField.totalsRowLabel = tField.totalsRowLabel;
-                    tableField.totalsRowFunction = tField.totalsRowFunction;
-                }
-            }
-
-            if (AutoFilter.Enabled)
-                targetSheet.Range(AutoFilter.Range.RangeAddress).SetAutoFilter();
 
             return targetSheet;
-        }
-
-        private String ReplaceRelativeSheet(string newSheetName, String value)
-        {
-            if (XLHelper.IsNullOrWhiteSpace(value)) return value;
-
-            var newValue = new StringBuilder();
-            var addresses = value.Split(',');
-            foreach (var address in addresses)
-            {
-                var pair = address.Split('!');
-                if (pair.Length == 2)
-                {
-                    String sheetName = pair[0];
-                    if (sheetName.StartsWith("'"))
-                        sheetName = sheetName.Substring(1, sheetName.Length - 2);
-
-                    String name = sheetName.ToLower().Equals(Name.ToLower())
-                                      ? newSheetName
-                                      : sheetName;
-                    newValue.Append(String.Format("{0}!{1}", name.WrapSheetNameInQuotesIfRequired(), pair[1]));
-                }
-                else
-                {
-                    newValue.Append(address);
-                }
-            }
-            return newValue.ToString();
         }
 
         public new IXLHyperlinks Hyperlinks { get; private set; }
@@ -710,9 +706,10 @@ namespace ClosedXML.Excel
             return this;
         }
 
-        IXLSheetProtection IXLWorksheet.Protection
+        IXLSheetProtection IXLProtectable<IXLSheetProtection, XLSheetProtectionElements>.Protection
         {
-            get { return Protection; }
+            get => Protection;
+            set => Protection = value as XLSheetProtection;
         }
 
         public IXLSheetProtection Protect()
@@ -720,9 +717,24 @@ namespace ClosedXML.Excel
             return Protection.Protect();
         }
 
-        public IXLSheetProtection Protect(String password)
+        public IXLSheetProtection Protect(String password, Algorithm algorithm = DefaultProtectionAlgorithm)
         {
-            return Protection.Protect(password);
+            return Protection.Protect(password, algorithm, XLSheetProtectionElements.SelectEverything);
+        }
+
+        public IXLSheetProtection Protect(String password, Algorithm algorithm, XLSheetProtectionElements allowedElements)
+        {
+            return Protection.Protect(password, algorithm, allowedElements);
+        }
+
+        IXLElementProtection IXLProtectable.Protect()
+        {
+            return Protect();
+        }
+
+        IXLElementProtection IXLProtectable.Protect(String password, Algorithm algorithm)
+        {
+            return Protect(password, algorithm);
         }
 
         public IXLSheetProtection Unprotect()
@@ -733,6 +745,16 @@ namespace ClosedXML.Excel
         public IXLSheetProtection Unprotect(String password)
         {
             return Protection.Unprotect(password);
+        }
+
+        IXLElementProtection IXLProtectable.Unprotect()
+        {
+            return Unprotect();
+        }
+
+        IXLElementProtection IXLProtectable.Unprotect(String password)
+        {
+            return Unprotect(password);
         }
 
         public new IXLRange Sort()
@@ -759,11 +781,17 @@ namespace ClosedXML.Excel
         }
 
         public Boolean ShowFormulas { get; set; }
+
         public Boolean ShowGridLines { get; set; }
+
         public Boolean ShowOutlineSymbols { get; set; }
+
         public Boolean ShowRowColHeaders { get; set; }
+
         public Boolean ShowRuler { get; set; }
+
         public Boolean ShowWhiteSpace { get; set; }
+
         public Boolean ShowZeros { get; set; }
 
         public IXLWorksheet SetShowFormulas()
@@ -919,85 +947,106 @@ namespace ClosedXML.Excel
             return this;
         }
 
-        public new IXLRanges Ranges(String ranges)
+        public override IXLRanges Ranges(String ranges)
         {
             var retVal = new XLRanges();
             foreach (string rangeAddressStr in ranges.Split(',').Select(s => s.Trim()))
             {
-                if (XLHelper.IsValidRangeAddress(rangeAddressStr))
-                    retVal.Add(Range(new XLRangeAddress(Worksheet, rangeAddressStr)));
-                else if (NamedRanges.Any(n => String.Compare(n.Name, rangeAddressStr, true) == 0))
-                    NamedRange(rangeAddressStr).Ranges.ForEach(retVal.Add);
-                else
+                if (rangeAddressStr.StartsWith("#REF!"))
                 {
-                    Workbook.NamedRanges.First(n =>
-                                               String.Compare(n.Name, rangeAddressStr, true) == 0
-                                               && n.Ranges.First().Worksheet == this)
-                        .Ranges.ForEach(retVal.Add);
+                    continue;
+                }
+                else if (XLHelper.IsValidRangeAddress(rangeAddressStr))
+                {
+                    retVal.Add(Range(new XLRangeAddress(Worksheet, rangeAddressStr)));
+                }
+                else if (NamedRanges.TryGetValue(rangeAddressStr, out IXLNamedRange worksheetNamedRange))
+                {
+                    worksheetNamedRange.Ranges.ForEach(retVal.Add);
+                }
+                else if (Workbook.NamedRanges.TryGetValue(rangeAddressStr, out IXLNamedRange workbookNamedRange)
+                    && workbookNamedRange.Ranges.First().Worksheet == this)
+                {
+                    workbookNamedRange.Ranges.ForEach(retVal.Add);
                 }
             }
             return retVal;
         }
 
-        IXLBaseAutoFilter IXLWorksheet.AutoFilter
+        IXLAutoFilter IXLWorksheet.AutoFilter
         {
             get { return AutoFilter; }
         }
 
-        public IXLRows RowsUsed(Boolean includeFormats = false, Func<IXLRow, Boolean> predicate = null)
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
+        public IXLRows RowsUsed(Boolean includeFormats, Func<IXLRow, Boolean> predicate = null)
         {
-            var rows = new XLRows(Worksheet);
+            return RowsUsed(includeFormats
+                    ? XLCellsUsedOptions.All
+                    : XLCellsUsedOptions.AllContents,
+                predicate);
+        }
+
+        public IXLRows RowsUsed(XLCellsUsedOptions options = XLCellsUsedOptions.AllContents, Func<IXLRow, Boolean> predicate = null)
+        {
+            var rows = new XLRows(Worksheet, StyleValue);
             var rowsUsed = new HashSet<Int32>();
             Internals.RowsCollection.Keys.ForEach(r => rowsUsed.Add(r));
             Internals.CellsCollection.RowsUsed.Keys.ForEach(r => rowsUsed.Add(r));
             foreach (var rowNum in rowsUsed)
             {
                 var row = Row(rowNum);
-                if (!row.IsEmpty(includeFormats) && (predicate == null || predicate(row)))
+                if (!row.IsEmpty(options) && (predicate == null || predicate(row)))
                     rows.Add(row);
-                else
-                    row.Dispose();
             }
             return rows;
         }
 
         public IXLRows RowsUsed(Func<IXLRow, Boolean> predicate = null)
         {
-            return RowsUsed(false, predicate);
+            return RowsUsed(XLCellsUsedOptions.AllContents, predicate);
         }
 
-        public IXLColumns ColumnsUsed(Boolean includeFormats = false, Func<IXLColumn, Boolean> predicate = null)
+        [Obsolete("Use the overload with XLCellsUsedOptions")]
+        public IXLColumns ColumnsUsed(Boolean includeFormats, Func<IXLColumn, Boolean> predicate = null)
         {
-            var columns = new XLColumns(Worksheet);
+            return ColumnsUsed(includeFormats
+                    ? XLCellsUsedOptions.All
+                    : XLCellsUsedOptions.AllContents,
+                predicate);
+        }
+
+        public IXLColumns ColumnsUsed(XLCellsUsedOptions options = XLCellsUsedOptions.AllContents, Func<IXLColumn, Boolean> predicate = null)
+        {
+            var columns = new XLColumns(Worksheet, StyleValue);
             var columnsUsed = new HashSet<Int32>();
             Internals.ColumnsCollection.Keys.ForEach(r => columnsUsed.Add(r));
             Internals.CellsCollection.ColumnsUsed.Keys.ForEach(r => columnsUsed.Add(r));
             foreach (var columnNum in columnsUsed)
             {
                 var column = Column(columnNum);
-                if (!column.IsEmpty(includeFormats) && (predicate == null || predicate(column)))
+                if (!column.IsEmpty(options) && (predicate == null || predicate(column)))
                     columns.Add(column);
-                else
-                    column.Dispose();
             }
             return columns;
         }
 
         public IXLColumns ColumnsUsed(Func<IXLColumn, Boolean> predicate = null)
         {
-            return ColumnsUsed(false, predicate);
+            return ColumnsUsed(XLCellsUsedOptions.AllContents, predicate);
         }
 
-        public new void Dispose()
+        internal void RegisterRangeIndex(IXLRangeIndex rangeIndex)
         {
-            if (AutoFilter != null)
-                AutoFilter.Dispose();
+            _rangeIndices.Add(rangeIndex);
+        }
 
+        internal void Cleanup()
+        {
             Internals.Dispose();
-
-            this.Pictures.ForEach(p => p.Dispose());
-
-            base.Dispose();
+            Pictures.ForEach(p => p.Dispose());
+            _rangeRepository.Clear();
+            _rangeIndices.Clear();
         }
 
         #endregion IXLWorksheet Members
@@ -1007,20 +1056,22 @@ namespace ClosedXML.Excel
         public void IncrementColumnOutline(Int32 level)
         {
             if (level <= 0) return;
-            if (!_columnOutlineCount.ContainsKey(level))
-                _columnOutlineCount.Add(level, 0);
-
-            _columnOutlineCount[level]++;
+            if (_columnOutlineCount.TryGetValue(level, out Int32 value))
+                _columnOutlineCount[level] = value + 1;
+            else
+                _columnOutlineCount.Add(level, 1);
         }
 
         public void DecrementColumnOutline(Int32 level)
         {
             if (level <= 0) return;
-            if (!_columnOutlineCount.ContainsKey(level))
+            if (_columnOutlineCount.TryGetValue(level, out Int32 value))
+            {
+                if (value > 0)
+                    _columnOutlineCount[level] = value - 1;
+            }
+            else
                 _columnOutlineCount.Add(level, 0);
-
-            if (_columnOutlineCount[level] > 0)
-                _columnOutlineCount[level]--;
         }
 
         public Int32 GetMaxColumnOutline()
@@ -1032,20 +1083,22 @@ namespace ClosedXML.Excel
         public void IncrementRowOutline(Int32 level)
         {
             if (level <= 0) return;
-            if (!_rowOutlineCount.ContainsKey(level))
+            if (_rowOutlineCount.TryGetValue(level, out Int32 value))
+                _rowOutlineCount[level] = value + 1;
+            else
                 _rowOutlineCount.Add(level, 0);
-
-            _rowOutlineCount[level]++;
         }
 
         public void DecrementRowOutline(Int32 level)
         {
             if (level <= 0) return;
-            if (!_rowOutlineCount.ContainsKey(level))
+            if (_rowOutlineCount.TryGetValue(level, out Int32 value))
+            {
+                if (value > 0)
+                    _rowOutlineCount[level] = level - 1;
+            }
+            else
                 _rowOutlineCount.Add(level, 0);
-
-            if (_rowOutlineCount[level] > 0)
-                _rowOutlineCount[level]--;
         }
 
         public Int32 GetMaxRowOutline()
@@ -1055,33 +1108,26 @@ namespace ClosedXML.Excel
 
         #endregion Outlines
 
-        public HashSet<Int32> GetStyleIds()
-        {
-            return Internals.CellsCollection.GetStyleIds(GetStyleId());
-        }
-
         public XLRow FirstRowUsed()
         {
-            return FirstRowUsed(false);
+            return FirstRowUsed(XLCellsUsedOptions.AllContents);
         }
 
-        public XLRow FirstRowUsed(Boolean includeFormats)
+        public XLRow FirstRowUsed(XLCellsUsedOptions options)
         {
-            using (var asRange = AsRange())
-            using (var rngRow = asRange.FirstRowUsed(includeFormats))
-                return rngRow != null ? Row(rngRow.RangeAddress.FirstAddress.RowNumber) : null;
+            var rngRow = AsRange().FirstRowUsed(options);
+            return rngRow != null ? Row(rngRow.RangeAddress.FirstAddress.RowNumber) : null;
         }
 
         public XLRow LastRowUsed()
         {
-            return LastRowUsed(false);
+            return LastRowUsed(XLCellsUsedOptions.AllContents);
         }
 
-        public XLRow LastRowUsed(Boolean includeFormats)
+        public XLRow LastRowUsed(XLCellsUsedOptions options)
         {
-            using (var asRange = AsRange())
-            using (var rngRow = asRange.LastRowUsed(includeFormats))
-                return rngRow != null ? Row(rngRow.RangeAddress.LastAddress.RowNumber) : null;
+            var rngRow = AsRange().LastRowUsed(options);
+            return rngRow != null ? Row(rngRow.RangeAddress.LastAddress.RowNumber) : null;
         }
 
         public XLColumn LastColumn()
@@ -1106,26 +1152,24 @@ namespace ClosedXML.Excel
 
         public XLColumn FirstColumnUsed()
         {
-            return FirstColumnUsed(false);
+            return FirstColumnUsed(XLCellsUsedOptions.AllContents);
         }
 
-        public XLColumn FirstColumnUsed(Boolean includeFormats)
+        public XLColumn FirstColumnUsed(XLCellsUsedOptions options)
         {
-            using (var asRange = AsRange())
-            using (var rngColumn = asRange.FirstColumnUsed(includeFormats))
-                return rngColumn != null ? Column(rngColumn.RangeAddress.FirstAddress.ColumnNumber) : null;
+            var rngColumn = AsRange().FirstColumnUsed(options);
+            return rngColumn != null ? Column(rngColumn.RangeAddress.FirstAddress.ColumnNumber) : null;
         }
 
         public XLColumn LastColumnUsed()
         {
-            return LastColumnUsed(false);
+            return LastColumnUsed(XLCellsUsedOptions.AllContents);
         }
 
-        public XLColumn LastColumnUsed(Boolean includeFormats)
+        public XLColumn LastColumnUsed(XLCellsUsedOptions options)
         {
-            using (var asRange = AsRange())
-            using (var rngColumn = asRange.LastColumnUsed(includeFormats))
-                return rngColumn != null ? Column(rngColumn.RangeAddress.LastAddress.ColumnNumber) : null;
+            var rngColumn = AsRange().LastColumnUsed(options);
+            return rngColumn != null ? Column(rngColumn.RangeAddress.LastAddress.ColumnNumber) : null;
         }
 
         public XLRow Row(Int32 row)
@@ -1133,23 +1177,24 @@ namespace ClosedXML.Excel
             return Row(row, true);
         }
 
-        public XLColumn Column(Int32 column)
+        public XLColumn Column(Int32 columnNumber)
         {
-            if (column <= 0 || column > XLHelper.MaxColumnNumber)
-                throw new IndexOutOfRangeException(String.Format("Column number must be between 1 and {0}",
-                                                                 XLHelper.MaxColumnNumber));
+            if (columnNumber <= 0 || columnNumber > XLHelper.MaxColumnNumber)
+                throw new ArgumentOutOfRangeException(nameof(columnNumber), $"Column number must be between 1 and {XLHelper.MaxColumnNumber}");
 
-            Int32 thisStyleId = GetStyleId();
-            if (!Internals.ColumnsCollection.ContainsKey(column))
+            if (Internals.ColumnsCollection.TryGetValue(columnNumber, out XLColumn column))
+                return column;
+            else
             {
-                // This is a new row so we're going to reference all
-                // cells in this row to preserve their formatting
-                Internals.RowsCollection.Keys.ForEach(r => Cell(r, column));
-                Internals.ColumnsCollection.Add(column,
-                                                new XLColumn(column, new XLColumnParameters(this, thisStyleId, false)));
+                // This is a new column so we're going to reference all
+                // cells in this column to preserve their formatting
+                Internals.RowsCollection.Keys.ForEach(r => Cell(r, columnNumber));
+
+                column = RangeFactory.CreateColumn(columnNumber);
+                Internals.ColumnsCollection.Add(columnNumber, column);
             }
 
-            return new XLColumn(column, new XLColumnParameters(this, thisStyleId, true));
+            return column;
         }
 
         public IXLColumn Column(String column)
@@ -1162,41 +1207,30 @@ namespace ClosedXML.Excel
             return Range(1, 1, XLHelper.MaxRowNumber, XLHelper.MaxColumnNumber);
         }
 
-        public void Clear()
+        internal override void WorksheetRangeShiftedColumns(XLRange range, int columnsShifted)
         {
-            Internals.CellsCollection.Clear();
-            Internals.ColumnsCollection.Clear();
-            Internals.MergedRanges.Clear();
-            Internals.RowsCollection.Clear();
-        }
-
-        private void WorksheetRangeShiftedColumns(XLRange range, int columnsShifted)
-        {
-            var newMerge = new XLRanges();
-            foreach (IXLRange rngMerged in Internals.MergedRanges)
+            if (!range.IsEntireColumn())
             {
-                if (range.RangeAddress.FirstAddress.ColumnNumber <= rngMerged.RangeAddress.FirstAddress.ColumnNumber
-                    && rngMerged.RangeAddress.FirstAddress.RowNumber >= range.RangeAddress.FirstAddress.RowNumber
-                    && rngMerged.RangeAddress.LastAddress.RowNumber <= range.RangeAddress.LastAddress.RowNumber)
+                var model = new XLRangeAddress(
+                    range.RangeAddress.FirstAddress,
+                    new XLAddress(range.RangeAddress.LastAddress.RowNumber, XLHelper.MaxColumnNumber, false, false));
+                var rangesToSplit = Worksheet.MergedRanges
+                    .GetIntersectedRanges(model)
+                    .Where(r => r.RangeAddress.FirstAddress.RowNumber < range.RangeAddress.FirstAddress.RowNumber ||
+                                r.RangeAddress.LastAddress.RowNumber > range.RangeAddress.LastAddress.RowNumber)
+                    .ToList();
+                foreach (var rangeToSplit in rangesToSplit)
                 {
-                    var newRng = Range(
-                        rngMerged.RangeAddress.FirstAddress.RowNumber,
-                        rngMerged.RangeAddress.FirstAddress.ColumnNumber + columnsShifted,
-                        rngMerged.RangeAddress.LastAddress.RowNumber,
-                        rngMerged.RangeAddress.LastAddress.ColumnNumber + columnsShifted);
-                    newMerge.Add(newRng);
+                    Worksheet.MergedRanges.Remove(rangeToSplit);
                 }
-                else if (
-                    !(range.RangeAddress.FirstAddress.ColumnNumber <= rngMerged.RangeAddress.FirstAddress.ColumnNumber
-                      && range.RangeAddress.FirstAddress.RowNumber <= rngMerged.RangeAddress.LastAddress.RowNumber))
-                    newMerge.Add(rngMerged);
             }
-            Internals.MergedRanges = newMerge;
 
             Workbook.Worksheets.ForEach(ws => MoveNamedRangesColumns(range, columnsShifted, ws.NamedRanges));
             MoveNamedRangesColumns(range, columnsShifted, Workbook.NamedRanges);
             ShiftConditionalFormattingColumns(range, columnsShifted);
+            ShiftDataValidationColumns(range, columnsShifted);
             ShiftPageBreaksColumns(range, columnsShifted);
+            RemoveInvalidSparklines();
         }
 
         private void ShiftPageBreaksColumns(XLRange range, int columnsShifted)
@@ -1213,57 +1247,119 @@ namespace ClosedXML.Excel
 
         private void ShiftConditionalFormattingColumns(XLRange range, int columnsShifted)
         {
-            Int32 firstColumn = range.RangeAddress.FirstAddress.ColumnNumber;
-            if (firstColumn == 1) return;
+            if (!ConditionalFormats.Any()) return;
+            Int32 firstCol = range.RangeAddress.FirstAddress.ColumnNumber;
+            if (firstCol == 1) return;
 
-            Int32 lastColumn = range.RangeAddress.FirstAddress.ColumnNumber + columnsShifted - 1;
-            Int32 firstRow = range.RangeAddress.FirstAddress.RowNumber;
-            Int32 lastRow = range.RangeAddress.LastAddress.RowNumber;
-            var insertedRange = Range(firstRow, firstColumn, lastRow, lastColumn);
-            var fc = insertedRange.FirstColumn();
-            var model = fc.ColumnLeft();
-            Int32 modelFirstRow = model.RangeAddress.FirstAddress.RowNumber;
-            if (ConditionalFormats.Any(cf => cf.Range.Intersects(model)))
+            int colNum = columnsShifted > 0 ? firstCol - 1 : firstCol;
+            var model = Column(colNum).AsRange();
+
+            foreach (var cf in ConditionalFormats.ToList())
             {
-                for (Int32 ro = firstRow; ro <= lastRow; ro++)
+                var cfRanges = cf.Ranges.ToList();
+                cf.Ranges.RemoveAll();
+
+                foreach (var cfRange in cfRanges)
                 {
-                    var cellModel = model.Cell(ro - modelFirstRow + 1);
-                    foreach (var cf in ConditionalFormats.Where(cf => cf.Range.Intersects(cellModel.AsRange())).ToList())
+                    var cfAddress = cfRange.RangeAddress;
+                    IXLRange newRange;
+                    if (cfRange.Intersects(model))
                     {
-                        Range(ro, firstColumn, ro, lastColumn).AddConditionalFormat(cf);
+                        newRange = Range(cfAddress.FirstAddress.RowNumber,
+                                         cfAddress.FirstAddress.ColumnNumber,
+                                         cfAddress.LastAddress.RowNumber,
+                                         Math.Min(XLHelper.MaxColumnNumber, cfAddress.LastAddress.ColumnNumber + columnsShifted));
                     }
+                    else if (cfAddress.FirstAddress.ColumnNumber >= firstCol)
+                    {
+                        newRange = Range(cfAddress.FirstAddress.RowNumber,
+                                         Math.Max(cfAddress.FirstAddress.ColumnNumber + columnsShifted, firstCol),
+                                         cfAddress.LastAddress.RowNumber,
+                                         Math.Min(XLHelper.MaxColumnNumber, cfAddress.LastAddress.ColumnNumber + columnsShifted));
+                    }
+                    else
+                        newRange = cfRange;
+
+                    if (newRange.RangeAddress.IsValid &&
+                        newRange.RangeAddress.FirstAddress.ColumnNumber <=
+                        newRange.RangeAddress.LastAddress.ColumnNumber)
+                        cf.Ranges.Add(newRange);
                 }
+
+                if (!cf.Ranges.Any())
+                    ConditionalFormats.Remove(f => f == cf);
             }
-            insertedRange.Dispose();
-            model.Dispose();
-            fc.Dispose();
         }
 
-        private void WorksheetRangeShiftedRows(XLRange range, int rowsShifted)
+        private void ShiftDataValidationColumns(XLRange range, int columnsShifted)
         {
-            var newMerge = new XLRanges();
-            foreach (IXLRange rngMerged in Internals.MergedRanges)
+            if (!DataValidations.Any()) return;
+            Int32 firstCol = range.RangeAddress.FirstAddress.ColumnNumber;
+            if (firstCol == 1) return;
+
+            int colNum = columnsShifted > 0 ? firstCol - 1 : firstCol;
+            var model = Column(colNum).AsRange();
+
+            foreach (var dv in DataValidations.ToList())
             {
-                if (range.RangeAddress.FirstAddress.RowNumber <= rngMerged.RangeAddress.FirstAddress.RowNumber
-                    && rngMerged.RangeAddress.FirstAddress.ColumnNumber >= range.RangeAddress.FirstAddress.ColumnNumber
-                    && rngMerged.RangeAddress.LastAddress.ColumnNumber <= range.RangeAddress.LastAddress.ColumnNumber)
+                var dvRanges = dv.Ranges.ToList();
+                dv.ClearRanges();
+
+                foreach (var dvRange in dvRanges)
                 {
-                    var newRng = Range(
-                        rngMerged.RangeAddress.FirstAddress.RowNumber + rowsShifted,
-                        rngMerged.RangeAddress.FirstAddress.ColumnNumber,
-                        rngMerged.RangeAddress.LastAddress.RowNumber + rowsShifted,
-                        rngMerged.RangeAddress.LastAddress.ColumnNumber);
-                    newMerge.Add(newRng);
+                    var dvAddress = dvRange.RangeAddress;
+                    IXLRange newRange;
+                    if (dvRange.Intersects(model))
+                    {
+                        newRange = Range(dvAddress.FirstAddress.RowNumber,
+                                         dvAddress.FirstAddress.ColumnNumber,
+                                         dvAddress.LastAddress.RowNumber,
+                                         Math.Min(XLHelper.MaxColumnNumber, dvAddress.LastAddress.ColumnNumber + columnsShifted));
+                    }
+                    else if (dvAddress.FirstAddress.ColumnNumber >= firstCol)
+                    {
+                        newRange = Range(dvAddress.FirstAddress.RowNumber,
+                                         Math.Max(dvAddress.FirstAddress.ColumnNumber + columnsShifted, firstCol),
+                                         dvAddress.LastAddress.RowNumber,
+                                         Math.Min(XLHelper.MaxColumnNumber, dvAddress.LastAddress.ColumnNumber + columnsShifted));
+                    }
+                    else
+                        newRange = dvRange;
+
+                    if (newRange.RangeAddress.IsValid &&
+                        newRange.RangeAddress.FirstAddress.ColumnNumber <=
+                        newRange.RangeAddress.LastAddress.ColumnNumber)
+                        dv.AddRange(newRange);
                 }
-                else if (!(range.RangeAddress.FirstAddress.RowNumber <= rngMerged.RangeAddress.FirstAddress.RowNumber
-                           && range.RangeAddress.FirstAddress.ColumnNumber <= rngMerged.RangeAddress.LastAddress.ColumnNumber))
-                    newMerge.Add(rngMerged);
+
+                if (!dv.Ranges.Any())
+                    DataValidations.Delete(v => v == dv);
             }
-            Internals.MergedRanges = newMerge;
+        }
+
+        internal override void WorksheetRangeShiftedRows(XLRange range, int rowsShifted)
+        {
+            if (!range.IsEntireRow())
+            {
+                var model = new XLRangeAddress(
+                    range.RangeAddress.FirstAddress,
+                    new XLAddress(XLHelper.MaxRowNumber, range.RangeAddress.LastAddress.ColumnNumber, false, false));
+                var rangesToSplit = Worksheet.MergedRanges
+                    .GetIntersectedRanges(model)
+                    .Where(r => r.RangeAddress.FirstAddress.ColumnNumber < range.RangeAddress.FirstAddress.ColumnNumber ||
+                                r.RangeAddress.LastAddress.ColumnNumber > range.RangeAddress.LastAddress.ColumnNumber)
+                    .ToList();
+                foreach (var rangeToSplit in rangesToSplit)
+                {
+                    Worksheet.MergedRanges.Remove(rangeToSplit);
+                }
+            }
 
             Workbook.Worksheets.ForEach(ws => MoveNamedRangesRows(range, rowsShifted, ws.NamedRanges));
             MoveNamedRangesRows(range, rowsShifted, Workbook.NamedRanges);
             ShiftConditionalFormattingRows(range, rowsShifted);
+            ShiftDataValidationRows(range, rowsShifted);
+            RemoveInvalidSparklines();
             ShiftPageBreaksRows(range, rowsShifted);
         }
 
@@ -1281,69 +1377,104 @@ namespace ClosedXML.Excel
 
         private void ShiftConditionalFormattingRows(XLRange range, int rowsShifted)
         {
+            if (!ConditionalFormats.Any()) return;
             Int32 firstRow = range.RangeAddress.FirstAddress.RowNumber;
             if (firstRow == 1) return;
 
-            SuspendEvents();
-            var rangeUsed = range.Worksheet.RangeUsed(true);
-            IXLRangeAddress usedAddress;
-            if (rangeUsed == null)
-                usedAddress = range.RangeAddress;
-            else
-                usedAddress = rangeUsed.RangeAddress;
-            ResumeEvents();
+            int rowNum = rowsShifted > 0 ? firstRow - 1 : firstRow;
+            var model = Row(rowNum).AsRange();
 
-            if (firstRow < usedAddress.FirstAddress.RowNumber) firstRow = usedAddress.FirstAddress.RowNumber;
-
-            Int32 lastRow = range.RangeAddress.FirstAddress.RowNumber + rowsShifted - 1;
-            if (lastRow > usedAddress.LastAddress.RowNumber) lastRow = usedAddress.LastAddress.RowNumber;
-
-            Int32 firstColumn = range.RangeAddress.FirstAddress.ColumnNumber;
-            if (firstColumn < usedAddress.FirstAddress.ColumnNumber) firstColumn = usedAddress.FirstAddress.ColumnNumber;
-
-            Int32 lastColumn = range.RangeAddress.LastAddress.ColumnNumber;
-            if (lastColumn > usedAddress.LastAddress.ColumnNumber) lastColumn = usedAddress.LastAddress.ColumnNumber;
-
-            var insertedRange = Range(firstRow, firstColumn, lastRow, lastColumn);
-            var fr = insertedRange.FirstRow();
-            var model = fr.RowAbove();
-            Int32 modelFirstColumn = model.RangeAddress.FirstAddress.ColumnNumber;
-            if (ConditionalFormats.Any(cf => cf.Range.Intersects(model)))
+            foreach (var cf in ConditionalFormats.ToList())
             {
-                for (Int32 co = firstColumn; co <= lastColumn; co++)
+                var cfRanges = cf.Ranges.ToList();
+                cf.Ranges.RemoveAll();
+
+                foreach (var cfRange in cfRanges)
                 {
-                    var cellModel = model.Cell(co - modelFirstColumn + 1);
-                    foreach (var cf in ConditionalFormats.Where(cf => cf.Range.Intersects(cellModel.AsRange())).ToList())
+                    var cfAddress = cfRange.RangeAddress;
+                    IXLRange newRange;
+                    if (cfRange.Intersects(model))
                     {
-                        Range(firstRow, co, lastRow, co).AddConditionalFormat(cf);
+                        newRange = Range(cfAddress.FirstAddress.RowNumber,
+                                         cfAddress.FirstAddress.ColumnNumber,
+                                         Math.Min(XLHelper.MaxRowNumber, cfAddress.LastAddress.RowNumber + rowsShifted),
+                                         cfAddress.LastAddress.ColumnNumber);
                     }
+                    else if (cfAddress.FirstAddress.RowNumber >= firstRow)
+                    {
+                        newRange = Range(Math.Max(cfAddress.FirstAddress.RowNumber + rowsShifted, firstRow),
+                                         cfAddress.FirstAddress.ColumnNumber,
+                                         Math.Min(XLHelper.MaxRowNumber, cfAddress.LastAddress.RowNumber + rowsShifted),
+                                         cfAddress.LastAddress.ColumnNumber);
+                    }
+                    else
+                        newRange = cfRange;
+
+                    if (newRange.RangeAddress.IsValid &&
+                        newRange.RangeAddress.FirstAddress.RowNumber <= newRange.RangeAddress.LastAddress.RowNumber)
+                        cf.Ranges.Add(newRange);
                 }
+
+                if (!cf.Ranges.Any())
+                    ConditionalFormats.Remove(f => f == cf);
             }
-            insertedRange.Dispose();
-            model.Dispose();
-            fr.Dispose();
         }
 
-        internal void BreakConditionalFormatsIntoCells(List<IXLAddress> addresses)
+        private void ShiftDataValidationRows(XLRange range, int rowsShifted)
         {
-            var newConditionalFormats = new XLConditionalFormats();
-            SuspendEvents();
-            foreach (var conditionalFormat in ConditionalFormats)
+            if (!DataValidations.Any()) return;
+            Int32 firstRow = range.RangeAddress.FirstAddress.RowNumber;
+            if (firstRow == 1) return;
+
+            int rowNum = rowsShifted > 0 ? firstRow - 1 : firstRow;
+            var model = Row(rowNum).AsRange();
+
+            foreach (var dv in DataValidations.ToList())
             {
-                foreach (XLCell cell in conditionalFormat.Range.Cells(c => !addresses.Contains(c.Address)))
+                var dvRanges = dv.Ranges.ToList();
+                dv.ClearRanges();
+
+                foreach (var dvRange in dvRanges)
                 {
-                    var row = cell.Address.RowNumber;
-                    var column = cell.Address.ColumnLetter;
-                    var newConditionalFormat = new XLConditionalFormat(cell.AsRange(), true);
-                    newConditionalFormat.CopyFrom(conditionalFormat);
-                    newConditionalFormat.Values.Values.Where(f => f.IsFormula)
-                        .ForEach(f => f._value = XLHelper.ReplaceRelative(f.Value, row, column));
-                    newConditionalFormats.Add(newConditionalFormat);
+                    var dvAddress = dvRange.RangeAddress;
+                    IXLRange newRange;
+                    if (dvRange.Intersects(model))
+                    {
+                        newRange = Range(dvAddress.FirstAddress.RowNumber,
+                                         dvAddress.FirstAddress.ColumnNumber,
+                                         Math.Min(XLHelper.MaxRowNumber, dvAddress.LastAddress.RowNumber + rowsShifted),
+                                         dvAddress.LastAddress.ColumnNumber);
+                    }
+                    else if (dvAddress.FirstAddress.RowNumber >= firstRow)
+                    {
+                        newRange = Range(Math.Max(dvAddress.FirstAddress.RowNumber + rowsShifted, firstRow),
+                                         dvAddress.FirstAddress.ColumnNumber,
+                                         Math.Min(XLHelper.MaxRowNumber, dvAddress.LastAddress.RowNumber + rowsShifted),
+                                         dvAddress.LastAddress.ColumnNumber);
+                    }
+                    else
+                        newRange = dvRange;
+
+                    if (newRange.RangeAddress.IsValid &&
+                        newRange.RangeAddress.FirstAddress.RowNumber <= newRange.RangeAddress.LastAddress.RowNumber)
+                        dv.AddRange(newRange);
                 }
-                conditionalFormat.Range.Dispose();
+
+                if (!dv.Ranges.Any())
+                    DataValidations.Delete(v => v == dv);
             }
-            ResumeEvents();
-            ConditionalFormats = newConditionalFormats;
+        }
+
+        private void RemoveInvalidSparklines()
+        {
+            var invalidSparklines = SparklineGroups.SelectMany(g => g)
+                .Where(sl => !((XLAddress)sl.Location.Address).IsValid)
+                .ToList();
+
+            foreach (var sparkline in invalidSparklines)
+            {
+                Worksheet.SparklineGroups.Remove(sparkline.Location);
+            }
         }
 
         private void MoveNamedRangesRows(XLRange range, int rowsShifted, IXLNamedRanges namedRanges)
@@ -1370,36 +1501,73 @@ namespace ClosedXML.Excel
 
         public void NotifyRangeShiftedRows(XLRange range, Int32 rowsShifted)
         {
-            if (RangeShiftedRows != null)
+            try
             {
-                foreach (var item in RangeShiftedRows)
+                SuspendEvents();
+
+                var rangesToShift = _rangeRepository
+                    .Where(r => r.RangeAddress.IsValid)
+                    .OrderBy(r => r.RangeAddress.FirstAddress.RowNumber * -Math.Sign(rowsShifted))
+                    .ToList();
+
+                WorksheetRangeShiftedRows(range, rowsShifted);
+
+                foreach (var storedRange in rangesToShift)
                 {
-                    item.Action(range, rowsShifted);
+                    if (storedRange.IsEntireColumn())
+                        continue;
+
+                    if (ReferenceEquals(range, storedRange))
+                        continue;
+
+                    storedRange.WorksheetRangeShiftedRows(range, rowsShifted);
                 }
+                range.WorksheetRangeShiftedRows(range, rowsShifted);
+            }
+            finally
+            {
+                ResumeEvents();
             }
         }
 
         public void NotifyRangeShiftedColumns(XLRange range, Int32 columnsShifted)
         {
-            if (RangeShiftedColumns != null)
+            try
             {
-                foreach (var item in RangeShiftedColumns)
+                SuspendEvents();
+
+                var rangesToShift = _rangeRepository
+                    .Where(r => r.RangeAddress.IsValid)
+                    .OrderBy(r => r.RangeAddress.FirstAddress.ColumnNumber * -Math.Sign(columnsShifted))
+                    .ToList();
+
+                WorksheetRangeShiftedColumns(range, columnsShifted);
+
+                foreach (var storedRange in rangesToShift)
                 {
-                    item.Action(range, columnsShifted);
+                    if (storedRange.IsEntireRow())
+                        continue;
+
+                    if (ReferenceEquals(range, storedRange))
+                        continue;
+
+                    storedRange.WorksheetRangeShiftedColumns(range, columnsShifted);
                 }
+                range.WorksheetRangeShiftedColumns(range, columnsShifted);
+            }
+            finally
+            {
+                ResumeEvents();
             }
         }
 
-        public XLRow Row(Int32 row, Boolean pingCells)
+        public XLRow Row(Int32 rowNumber, Boolean pingCells)
         {
-            if (row <= 0 || row > XLHelper.MaxRowNumber)
-                throw new IndexOutOfRangeException(String.Format("Row number must be between 1 and {0}",
-                                                                 XLHelper.MaxRowNumber));
+            if (rowNumber <= 0 || rowNumber > XLHelper.MaxRowNumber)
+                throw new ArgumentOutOfRangeException(nameof(rowNumber), $"Row number must be between 1 and {XLHelper.MaxRowNumber}");
 
-            Int32 styleId;
-            XLRow rowToUse;
-            if (Internals.RowsCollection.TryGetValue(row, out rowToUse))
-                styleId = rowToUse.GetStyleId();
+            if (Internals.RowsCollection.TryGetValue(rowNumber, out XLRow row))
+                return row;
             else
             {
                 if (pingCells)
@@ -1407,19 +1575,79 @@ namespace ClosedXML.Excel
                     // This is a new row so we're going to reference all
                     // cells in columns of this row to preserve their formatting
 
-                    var usedColumns = from c in Internals.ColumnsCollection
-                                      join dc in Internals.CellsCollection.ColumnsUsed.Keys
-                                          on c.Key equals dc
-                                      where !Internals.CellsCollection.Contains(row, dc)
-                                      select dc;
-
-                    usedColumns.ForEach(c => Cell(row, c));
+                    Internals.ColumnsCollection.Keys.ForEach(c => Cell(rowNumber, c));
                 }
-                styleId = GetStyleId();
-                Internals.RowsCollection.Add(row, new XLRow(row, new XLRowParameters(this, styleId, false)));
+
+                row = RangeFactory.CreateRow(rowNumber);
+                Internals.RowsCollection.Add(rowNumber, row);
             }
 
-            return new XLRow(row, new XLRowParameters(this, styleId));
+            return row;
+        }
+
+        public IXLTable Table(XLRange range, Boolean addToTables, Boolean setAutofilter = true)
+        {
+            return Table(range, GetNewTableName("Table"), addToTables, setAutofilter);
+        }
+
+        public IXLTable Table(XLRange range, String name, Boolean addToTables, Boolean setAutofilter = true)
+        {
+            CheckRangeNotOverlappingOtherEntities(range);
+            XLRangeAddress rangeAddress;
+            if (range.Rows().Count() == 1)
+            {
+                rangeAddress = new XLRangeAddress(range.FirstCell().Address, range.LastCell().CellBelow().Address);
+                range.InsertRowsBelow(1);
+            }
+            else
+                rangeAddress = range.RangeAddress;
+
+            var rangeKey = new XLRangeKey(XLRangeType.Table, rangeAddress);
+            var table = (XLTable)_rangeRepository.GetOrCreate(ref rangeKey);
+
+            if (table.Name != name)
+                table.Name = name;
+
+            if (addToTables && !Tables.Contains(table))
+            {
+                Tables.Add(table);
+            }
+
+            if (setAutofilter && !table.ShowAutoFilter)
+                table.InitializeAutoFilter();
+
+            return table;
+        }
+
+        private void CheckRangeNotOverlappingOtherEntities(XLRange range)
+        {
+            // Check that the range doesn't overlap with any existing tables
+            var firstOverlappingTable = Tables.FirstOrDefault(t => t.RangeUsed().Intersects(range));
+            if (firstOverlappingTable != null)
+                throw new InvalidOperationException($"The range {range.RangeAddress.ToStringRelative(includeSheet: true)} is already part of table '{firstOverlappingTable.Name}'");
+
+            // Check that the range doesn't overlap with any filters
+            if (AutoFilter.IsEnabled && this.AutoFilter.Range.Intersects(range))
+                throw new InvalidOperationException($"The range {range.RangeAddress.ToStringRelative(includeSheet: true)} overlaps with the worksheet's autofilter.");
+        }
+
+        private string GetNewTableName(string baseName)
+        {
+            var existingTableNames = new HashSet<String>(
+                this.Workbook.Worksheets
+                    .SelectMany(ws => ws.Tables)
+                    .Select(t => t.Name),
+                StringComparer.OrdinalIgnoreCase);
+
+            var i = 1;
+            string tableName;
+            do
+            {
+                tableName = baseName + i.ToString();
+                i++;
+            } while (existingTableNames.Contains(tableName));
+
+            return tableName;
         }
 
         private IXLRange GetRangeForSort()
@@ -1435,38 +1663,35 @@ namespace ClosedXML.Excel
             return (XLPivotTable)PivotTables.PivotTable(name);
         }
 
-        public new IXLCells Cells()
+        public override IXLCells Cells()
         {
-            return Cells(true, true);
+            return Cells(true, XLCellsUsedOptions.All);
         }
 
-        public new IXLCells Cells(Boolean usedCellsOnly)
+        public override IXLCells Cells(Boolean usedCellsOnly)
         {
             if (usedCellsOnly)
-                return Cells(true, true);
+                return Cells(true, XLCellsUsedOptions.AllContents);
             else
-                return Range(FirstCellUsed(), LastCellUsed()).Cells(false, true);
+                return Range((this as IXLRangeBase).FirstCellUsed(XLCellsUsedOptions.All),
+                             (this as IXLRangeBase).LastCellUsed(XLCellsUsedOptions.All))
+                    .Cells(false, XLCellsUsedOptions.All);
         }
 
-        public new XLCell Cell(String cellAddressInRange)
+        public override XLCell Cell(String cellAddressInRange)
         {
-            if (XLHelper.IsValidA1Address(cellAddressInRange))
-                return Cell(XLAddress.Create(this, cellAddressInRange));
+            var cell = base.Cell(cellAddressInRange);
+            if (cell != null) return cell;
 
-            if (NamedRanges.Any(n => String.Compare(n.Name, cellAddressInRange, true) == 0))
-                return (XLCell)NamedRange(cellAddressInRange).Ranges.First().FirstCell();
+            if (Workbook.NamedRanges.TryGetValue(cellAddressInRange, out IXLNamedRange workbookNamedRange))
+            {
+                if (!workbookNamedRange.Ranges.Any())
+                    return null;
 
-            var namedRanges = Workbook.NamedRanges.FirstOrDefault(n =>
-                                                      String.Compare(n.Name, cellAddressInRange, true) == 0
-                                                      && n.Ranges.Count == 1);
-            if (namedRanges == null || !namedRanges.Ranges.Any()) return null;
+                return workbookNamedRange.Ranges.FirstOrDefault().FirstCell().CastTo<XLCell>();
+            }
 
-            return (XLCell)namedRanges.Ranges.First().FirstCell();
-        }
-
-        internal XLCell CellFast(String cellAddressInRange)
-        {
-            return Cell(XLAddress.Create(this, cellAddressInRange));
+            return null;
         }
 
         public override XLRange Range(String rangeAddressStr)
@@ -1477,20 +1702,25 @@ namespace ClosedXML.Excel
             if (rangeAddressStr.Contains("["))
                 return Table(rangeAddressStr.Substring(0, rangeAddressStr.IndexOf("["))) as XLRange;
 
-            if (NamedRanges.Any(n => String.Compare(n.Name, rangeAddressStr, true) == 0))
-                return (XLRange)NamedRange(rangeAddressStr).Ranges.First();
+            if (NamedRanges.TryGetValue(rangeAddressStr, out IXLNamedRange worksheetNamedRange))
+                return worksheetNamedRange.Ranges.First().CastTo<XLRange>();
 
-            var namedRanges = Workbook.NamedRanges.FirstOrDefault(n =>
-                                                       String.Compare(n.Name, rangeAddressStr, true) == 0
-                                                       && n.Ranges.Count == 1
-                                                       );
-            if (namedRanges == null || !namedRanges.Ranges.Any()) return null;
-            return (XLRange)namedRanges.Ranges.First();
+            if (Workbook.NamedRanges.TryGetValue(rangeAddressStr, out IXLNamedRange workbookNamedRange))
+            {
+                if (!workbookNamedRange.Ranges.Any())
+                    return null;
+
+                return workbookNamedRange.Ranges.First().CastTo<XLRange>();
+            }
+
+            return null;
         }
 
         public IXLRanges MergedRanges { get { return Internals.MergedRanges; } }
 
         public IXLConditionalFormats ConditionalFormats { get; private set; }
+
+        public IXLSparklineGroups SparklineGroups { get; private set; }
 
         private Boolean _eventTracking;
 
@@ -1505,13 +1735,26 @@ namespace ClosedXML.Excel
             EventTrackingEnabled = _eventTracking;
         }
 
-        public IXLRanges SelectedRanges { get; internal set; }
+        private IXLRanges _selectedRanges;
+
+        public IXLRanges SelectedRanges
+        {
+            get
+            {
+                _selectedRanges?.RemoveAll(r => !r.RangeAddress.IsValid);
+                return _selectedRanges;
+            }
+            internal set
+            {
+                _selectedRanges = value;
+            }
+        }
 
         public IXLCell ActiveCell { get; set; }
 
         private XLCalcEngine _calcEngine;
 
-        private XLCalcEngine CalcEngine
+        internal XLCalcEngine CalcEngine
         {
             get { return _calcEngine ?? (_calcEngine = new XLCalcEngine(this)); }
         }
@@ -1521,9 +1764,26 @@ namespace ClosedXML.Excel
             return CalcEngine.Evaluate(expression);
         }
 
+        /// <summary>
+        /// Force recalculation of all cell formulas.
+        /// </summary>
+        public void RecalculateAllFormulas()
+        {
+            CellsUsed().Cast<XLCell>().ForEach(cell => cell.Evaluate(true));
+        }
+
         public String Author { get; set; }
 
+        public override string ToString()
+        {
+            return this.Name;
+        }
+
         public IXLPictures Pictures { get; private set; }
+
+        public Boolean IsPasswordProtected => Protection.IsPasswordProtected;
+
+        public bool IsProtected => Protection.IsProtected;
 
         public IXLPicture Picture(string pictureName)
         {
@@ -1540,7 +1800,12 @@ namespace ClosedXML.Excel
             return Pictures.Add(stream, name);
         }
 
-        public Drawings.IXLPicture AddPicture(Stream stream, XLPictureFormat format)
+        internal IXLPicture AddPicture(Stream stream, string name, int Id)
+        {
+            return (Pictures as XLPictures).Add(stream, name, Id);
+        }
+
+        public IXLPicture AddPicture(Stream stream, XLPictureFormat format)
         {
             return Pictures.Add(stream, format);
         }
@@ -1568,6 +1833,154 @@ namespace ClosedXML.Excel
         public IXLPicture AddPicture(string imageFile, string name)
         {
             return Pictures.Add(imageFile, name);
+        }
+
+        public override Boolean IsEntireRow()
+        {
+            return true;
+        }
+
+        public override Boolean IsEntireColumn()
+        {
+            return true;
+        }
+
+        internal void SetValue<T>(T value, int ro, int co) where T : class
+        {
+            if (value == null)
+                this.Cell(ro, co).SetValue(String.Empty);
+            else if (value is IConvertible)
+                this.Cell(ro, co).SetValue((T)Convert.ChangeType(value, typeof(T)));
+            else
+                this.Cell(ro, co).SetValue(value);
+        }
+
+        /// <summary>
+        /// Get a cell value not initializing it if it has not been initialized yet.
+        /// </summary>
+        /// <param name="ro">Row number</param>
+        /// <param name="co">Column number</param>
+        /// <returns>Current value of the specified cell. Empty string for non-initialized cells.</returns>
+        internal object GetCellValue(int ro, int co)
+        {
+            if (Internals.CellsCollection.MaxRowUsed < ro ||
+                Internals.CellsCollection.MaxColumnUsed < co ||
+                !Internals.CellsCollection.Contains(ro, co))
+                return string.Empty;
+
+            var cell = Worksheet.Internals.CellsCollection.GetCell(ro, co);
+            if (cell.IsEvaluating)
+                return string.Empty;
+
+            return cell.Value;
+        }
+
+        public XLRange GetOrCreateRange(XLRangeParameters xlRangeParameters)
+        {
+            var rangeKey = new XLRangeKey(XLRangeType.Range, xlRangeParameters.RangeAddress);
+            var range = _rangeRepository.GetOrCreate(ref rangeKey);
+            if (xlRangeParameters.DefaultStyle != null && range.StyleValue == StyleValue)
+                range.InnerStyle = xlRangeParameters.DefaultStyle;
+
+            return range as XLRange;
+        }
+
+        /// <summary>
+        /// Get a range row from the shared repository or create a new one.
+        /// </summary>
+        /// <param name="address">Address of range row.</param>
+        /// <param name="defaultStyle">Style to apply. If null the worksheet's style is applied.</param>
+        /// <returns>Range row with the specified address.</returns>
+        public XLRangeRow RangeRow(XLRangeAddress address, IXLStyle defaultStyle = null)
+        {
+            var rangeKey = new XLRangeKey(XLRangeType.RangeRow, address);
+            var rangeRow = (XLRangeRow)_rangeRepository.GetOrCreate(ref rangeKey);
+
+            if (defaultStyle != null && rangeRow.StyleValue == StyleValue)
+                rangeRow.InnerStyle = defaultStyle;
+
+            return rangeRow;
+        }
+
+        /// <summary>
+        /// Get a range column from the shared repository or create a new one.
+        /// </summary>
+        /// <param name="address">Address of range column.</param>
+        /// <param name="defaultStyle">Style to apply. If null the worksheet's style is applied.</param>
+        /// <returns>Range column with the specified address.</returns>
+        public XLRangeColumn RangeColumn(XLRangeAddress address, IXLStyle defaultStyle = null)
+        {
+            var rangeKey = new XLRangeKey(XLRangeType.RangeColumn, address);
+            var rangeColumn = (XLRangeColumn)_rangeRepository.GetOrCreate(ref rangeKey);
+
+            if (defaultStyle != null && rangeColumn.StyleValue == StyleValue)
+                rangeColumn.InnerStyle = defaultStyle;
+
+            return rangeColumn;
+        }
+
+        protected override void OnRangeAddressChanged(XLRangeAddress oldAddress, XLRangeAddress newAddress)
+        {
+        }
+
+        public void RellocateRange(XLRangeType rangeType, XLRangeAddress oldAddress, XLRangeAddress newAddress)
+        {
+            if (_rangeRepository == null)
+                return;
+
+            var oldKey = new XLRangeKey(rangeType, oldAddress);
+            var newKey = new XLRangeKey(rangeType, newAddress);
+            var range = _rangeRepository.Replace(ref oldKey, ref newKey);
+
+            foreach (var rangeIndex in _rangeIndices)
+            {
+                if (!rangeIndex.MatchesType(rangeType))
+                    continue;
+
+                if (rangeIndex.Remove(oldAddress) &&
+                    newAddress.IsValid &&
+                    range != null)
+                {
+                    rangeIndex.Add(range);
+                }
+            }
+        }
+
+        internal void DeleteColumn(int columnNumber)
+        {
+            Internals.ColumnsCollection.Remove(columnNumber);
+
+            var columnsToMove = new List<Int32>();
+            columnsToMove.AddRange(
+                Internals.ColumnsCollection.Where(c => c.Key > columnNumber).Select(c => c.Key));
+            foreach (int column in columnsToMove.OrderBy(c => c))
+            {
+                Internals.ColumnsCollection.Add(column - 1, Internals.ColumnsCollection[column]);
+                Internals.ColumnsCollection.Remove(column);
+
+                Internals.ColumnsCollection[column - 1].SetColumnNumber(column - 1);
+            }
+        }
+
+        internal void DeleteRow(int rowNumber)
+        {
+            Internals.RowsCollection.Remove(rowNumber);
+
+            var rowsToMove = new List<Int32>();
+            rowsToMove.AddRange(Internals.RowsCollection.Where(c => c.Key > rowNumber).Select(c => c.Key));
+            foreach (int row in rowsToMove.OrderBy(r => r))
+            {
+                Internals.RowsCollection.Add(row - 1, Worksheet.Internals.RowsCollection[row]);
+                Internals.RowsCollection.Remove(row);
+
+                Internals.RowsCollection[row - 1].SetRowNumber(row - 1);
+            }
+        }
+
+        internal void DeleteRange(XLRangeAddress rangeAddress)
+        {
+            var rangeKey = new XLRangeKey(XLRangeType.Range, rangeAddress);
+            _rangeRepository.Remove(ref rangeKey);
         }
     }
 }

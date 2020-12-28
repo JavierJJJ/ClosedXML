@@ -3,6 +3,7 @@ using DocumentFormat.OpenXml.Packaging;
 using DocumentFormat.OpenXml.Spreadsheet;
 using System;
 using Vml = DocumentFormat.OpenXml.Vml;
+using X14 = DocumentFormat.OpenXml.Office2010.Excel;
 using Xdr = DocumentFormat.OpenXml.Drawing.Spreadsheet;
 
 namespace ClosedXML.Excel
@@ -30,12 +31,8 @@ namespace ClosedXML.Excel
                 case XLFontUnderlineValues.SingleAccounting:
                     return UnderlineValues.SingleAccounting;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -52,12 +49,8 @@ namespace ClosedXML.Excel
                 case XLPageOrientation.Portrait:
                     return OrientationValues.Portrait;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -74,12 +67,8 @@ namespace ClosedXML.Excel
                 case XLFontVerticalTextAlignmentValues.Superscript:
                     return VerticalAlignmentRunValues.Superscript;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -144,12 +133,8 @@ namespace ClosedXML.Excel
                 case XLFillPatternValues.Solid:
                     return PatternValues.Solid;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -199,12 +184,8 @@ namespace ClosedXML.Excel
                 case XLBorderStyleValues.Thin:
                     return BorderStyleValues.Thin;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -236,12 +217,8 @@ namespace ClosedXML.Excel
                 case XLAlignmentHorizontalValues.Right:
                     return HorizontalAlignmentValues.Right;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -264,12 +241,8 @@ namespace ClosedXML.Excel
                 case XLAlignmentVerticalValues.Top:
                     return VerticalAlignmentValues.Top;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -283,12 +256,8 @@ namespace ClosedXML.Excel
                 case XLPageOrderValues.OverThenDown:
                     return PageOrderValues.OverThenDown;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -305,12 +274,8 @@ namespace ClosedXML.Excel
                 case XLShowCommentsValues.None:
                     return CellCommentsValues.None;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -330,12 +295,8 @@ namespace ClosedXML.Excel
                 case XLPrintErrorValues.NA:
                     return PrintErrorValues.NA;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -352,12 +313,8 @@ namespace ClosedXML.Excel
                 case XLCalculateMode.Manual:
                     return CalculateModeValues.Manual;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -371,12 +328,8 @@ namespace ClosedXML.Excel
                 case XLReferenceStyle.A1:
                     return ReferenceModeValues.A1;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -393,12 +346,8 @@ namespace ClosedXML.Excel
                 case XLAlignmentReadingOrderValues.RightToLeft:
                     return 2;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -436,12 +385,8 @@ namespace ClosedXML.Excel
                 case XLTotalsRowFunction.Custom:
                     return TotalsRowFunctionValues.Custom;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -473,12 +418,8 @@ namespace ClosedXML.Excel
                 case XLAllowedValues.WholeNumber:
                     return DataValidationValues.Whole;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -495,12 +436,8 @@ namespace ClosedXML.Excel
                 case XLErrorStyle.Stop:
                     return DataValidationErrorStyleValues.Stop;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -532,12 +469,8 @@ namespace ClosedXML.Excel
                 case XLOperator.NotEqualTo:
                     return DataValidationOperatorValues.NotEqual;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -554,12 +487,8 @@ namespace ClosedXML.Excel
                 case XLWorksheetVisibility.VeryHidden:
                     return SheetStateValues.VeryHidden;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -579,12 +508,8 @@ namespace ClosedXML.Excel
                 case XLPhoneticAlignment.NoControl:
                     return PhoneticAlignmentValues.NoControl;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -604,12 +529,8 @@ namespace ClosedXML.Excel
                 case XLPhoneticType.NoConversion:
                     return PhoneticValues.NoConversion;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -629,12 +550,8 @@ namespace ClosedXML.Excel
                 case XLPivotSummary.Variance: return DataConsolidateFunctionValues.Variance;
                 case XLPivotSummary.PopulationVariance: return DataConsolidateFunctionValues.VarianceP;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -652,12 +569,8 @@ namespace ClosedXML.Excel
                 case XLPivotCalculation.PercentageOfTotal: return ShowDataAsValues.PercentOfTotal;
                 case XLPivotCalculation.Index: return ShowDataAsValues.Index;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -672,12 +585,8 @@ namespace ClosedXML.Excel
                 case XLFilterOperator.LessThan: return FilterOperatorValues.LessThan;
                 case XLFilterOperator.EqualOrLessThan: return FilterOperatorValues.LessThanOrEqual;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -688,12 +597,24 @@ namespace ClosedXML.Excel
                 case XLFilterDynamicType.AboveAverage: return DynamicFilterValues.AboveAverage;
                 case XLFilterDynamicType.BelowAverage: return DynamicFilterValues.BelowAverage;
 
-                #region default
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static DateTimeGroupingValues ToOpenXml(this XLDateTimeGrouping value)
+        {
+            switch (value)
+            {
+                case XLDateTimeGrouping.Year: return DateTimeGroupingValues.Year;
+                case XLDateTimeGrouping.Month: return DateTimeGroupingValues.Month;
+                case XLDateTimeGrouping.Day: return DateTimeGroupingValues.Day;
+                case XLDateTimeGrouping.Hour: return DateTimeGroupingValues.Hour;
+                case XLDateTimeGrouping.Minute: return DateTimeGroupingValues.Minute;
+                case XLDateTimeGrouping.Second: return DateTimeGroupingValues.Second;
 
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -705,12 +626,8 @@ namespace ClosedXML.Excel
                 case XLSheetViewOptions.PageBreakPreview: return SheetViewValues.PageBreakPreview;
                 case XLSheetViewOptions.PageLayout: return SheetViewValues.PageLayout;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -724,12 +641,8 @@ namespace ClosedXML.Excel
                 case XLLineStyle.ThinThick: return Vml.StrokeLineStyleValues.ThinThick;
                 case XLLineStyle.ThinThin: return Vml.StrokeLineStyleValues.ThinThin;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -756,12 +669,8 @@ namespace ClosedXML.Excel
                 case XLConditionalFormatType.TimePeriod: return ConditionalFormatValues.TimePeriod;
                 case XLConditionalFormatType.AboveAverage: return ConditionalFormatValues.AboveAverage;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -776,12 +685,8 @@ namespace ClosedXML.Excel
                 case XLCFContentType.Formula: return ConditionalFormatValueObjectValues.Formula;
                 case XLCFContentType.Percentile: return ConditionalFormatValueObjectValues.Percentile;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -802,12 +707,8 @@ namespace ClosedXML.Excel
                 case XLCFOperator.StartsWith: return ConditionalFormattingOperatorValues.BeginsWith;
                 case XLCFOperator.EndsWith: return ConditionalFormattingOperatorValues.EndsWith;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -833,12 +734,28 @@ namespace ClosedXML.Excel
                 case XLIconSetStyle.FiveRating: return IconSetValues.FiveRating;
                 case XLIconSetStyle.FiveQuarters: return IconSetValues.FiveQuarters;
 
-                #region default
-
                 default:
                     throw new ArgumentOutOfRangeException("Not implemented value!");
+            }
+        }
 
-                    #endregion default
+        public static TimePeriodValues ToOpenXml(this XLTimePeriod value)
+        {
+            switch (value)
+            {
+                case XLTimePeriod.Yesterday: return TimePeriodValues.Yesterday;
+                case XLTimePeriod.Today: return TimePeriodValues.Today;
+                case XLTimePeriod.Tomorrow: return TimePeriodValues.Tomorrow;
+                case XLTimePeriod.InTheLast7Days: return TimePeriodValues.Last7Days;
+                case XLTimePeriod.LastWeek: return TimePeriodValues.LastWeek;
+                case XLTimePeriod.ThisWeek: return TimePeriodValues.ThisWeek;
+                case XLTimePeriod.NextWeek: return TimePeriodValues.NextWeek;
+                case XLTimePeriod.LastMonth: return TimePeriodValues.LastMonth;
+                case XLTimePeriod.ThisMonth: return TimePeriodValues.ThisMonth;
+                case XLTimePeriod.NextMonth: return TimePeriodValues.NextMonth;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -853,12 +770,87 @@ namespace ClosedXML.Excel
             {
                 case XLPicturePlacement.FreeFloating:
                     return Xdr.EditAsValues.Absolute;
+
                 case XLPicturePlacement.Move:
                     return Xdr.EditAsValues.OneCell;
+
                 case XLPicturePlacement.MoveAndSize:
                     return Xdr.EditAsValues.TwoCell;
+
                 default:
                     throw new ArgumentOutOfRangeException("Not implemented value!");
+            }
+        }
+
+        public static PivotAreaValues ToOpenXml(this XLPivotAreaValues value)
+        {
+            switch (value)
+            {
+                case XLPivotAreaValues.None:
+                    return PivotAreaValues.None;
+
+                case XLPivotAreaValues.Normal:
+                    return PivotAreaValues.Normal;
+
+                case XLPivotAreaValues.Data:
+                    return PivotAreaValues.Data;
+
+                case XLPivotAreaValues.All:
+                    return PivotAreaValues.All;
+
+                case XLPivotAreaValues.Origin:
+                    return PivotAreaValues.Origin;
+
+                case XLPivotAreaValues.Button:
+                    return PivotAreaValues.Button;
+
+                case XLPivotAreaValues.TopRight:
+                    return PivotAreaValues.TopRight;
+
+                case XLPivotAreaValues.TopEnd:
+                    return PivotAreaValues.TopEnd;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "XLPivotAreaValues value not implemented");
+            }
+        }
+
+        public static X14.SparklineTypeValues ToOpenXml(this XLSparklineType value)
+        {
+            switch (value)
+            {
+                case XLSparklineType.Line: return X14.SparklineTypeValues.Line;
+                case XLSparklineType.Column: return X14.SparklineTypeValues.Column;
+                case XLSparklineType.Stacked: return X14.SparklineTypeValues.Stacked;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static X14.SparklineAxisMinMaxValues ToOpenXml(this XLSparklineAxisMinMax value)
+        {
+            switch (value)
+            {
+                case XLSparklineAxisMinMax.Automatic: return X14.SparklineAxisMinMaxValues.Individual;
+                case XLSparklineAxisMinMax.SameForAll: return X14.SparklineAxisMinMaxValues.Group;
+                case XLSparklineAxisMinMax.Custom: return X14.SparklineAxisMinMaxValues.Custom;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static X14.DisplayBlanksAsValues ToOpenXml(this XLDisplayBlanksAsValues value)
+        {
+            switch (value)
+            {
+                case XLDisplayBlanksAsValues.Interpolate: return X14.DisplayBlanksAsValues.Span;
+                case XLDisplayBlanksAsValues.NotPlotted: return X14.DisplayBlanksAsValues.Gap;
+                case XLDisplayBlanksAsValues.Zero: return X14.DisplayBlanksAsValues.Zero;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -885,12 +877,8 @@ namespace ClosedXML.Excel
                 case UnderlineValues.SingleAccounting:
                     return XLFontUnderlineValues.SingleAccounting;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -907,12 +895,8 @@ namespace ClosedXML.Excel
                 case OrientationValues.Portrait:
                     return XLPageOrientation.Portrait;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -929,12 +913,8 @@ namespace ClosedXML.Excel
                 case VerticalAlignmentRunValues.Superscript:
                     return XLFontVerticalTextAlignmentValues.Superscript;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -999,12 +979,8 @@ namespace ClosedXML.Excel
                 case PatternValues.Solid:
                     return XLFillPatternValues.Solid;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1054,12 +1030,8 @@ namespace ClosedXML.Excel
                 case BorderStyleValues.Thin:
                     return XLBorderStyleValues.Thin;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1091,12 +1063,8 @@ namespace ClosedXML.Excel
                 case HorizontalAlignmentValues.Right:
                     return XLAlignmentHorizontalValues.Right;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1119,12 +1087,8 @@ namespace ClosedXML.Excel
                 case VerticalAlignmentValues.Top:
                     return XLAlignmentVerticalValues.Top;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1138,12 +1102,8 @@ namespace ClosedXML.Excel
                 case PageOrderValues.OverThenDown:
                     return XLPageOrderValues.OverThenDown;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1160,12 +1120,8 @@ namespace ClosedXML.Excel
                 case CellCommentsValues.None:
                     return XLShowCommentsValues.None;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1185,12 +1141,8 @@ namespace ClosedXML.Excel
                 case PrintErrorValues.NA:
                     return XLPrintErrorValues.NA;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1207,12 +1159,8 @@ namespace ClosedXML.Excel
                 case CalculateModeValues.Manual:
                     return XLCalculateMode.Manual;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1226,12 +1174,8 @@ namespace ClosedXML.Excel
                 case ReferenceModeValues.A1:
                     return XLReferenceStyle.A1;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1248,12 +1192,8 @@ namespace ClosedXML.Excel
                 case 2:
                     return XLAlignmentReadingOrderValues.RightToLeft;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1291,12 +1231,8 @@ namespace ClosedXML.Excel
                 case TotalsRowFunctionValues.Custom:
                     return XLTotalsRowFunction.Custom;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1328,12 +1264,8 @@ namespace ClosedXML.Excel
                 case DataValidationValues.Whole:
                     return XLAllowedValues.WholeNumber;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1350,12 +1282,8 @@ namespace ClosedXML.Excel
                 case DataValidationErrorStyleValues.Stop:
                     return XLErrorStyle.Stop;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1387,12 +1315,8 @@ namespace ClosedXML.Excel
                 case DataValidationOperatorValues.NotEqual:
                     return XLOperator.NotEqualTo;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1409,12 +1333,8 @@ namespace ClosedXML.Excel
                 case SheetStateValues.VeryHidden:
                     return XLWorksheetVisibility.VeryHidden;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1434,12 +1354,8 @@ namespace ClosedXML.Excel
                 case PhoneticAlignmentValues.NoControl:
                     return XLPhoneticAlignment.NoControl;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1457,12 +1373,8 @@ namespace ClosedXML.Excel
                 case PhoneticValues.NoConversion:
                     return XLPhoneticType.NoConversion;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1482,12 +1394,8 @@ namespace ClosedXML.Excel
                 case DataConsolidateFunctionValues.Variance: return XLPivotSummary.Variance;
                 case DataConsolidateFunctionValues.VarianceP: return XLPivotSummary.PopulationVariance;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1505,12 +1413,8 @@ namespace ClosedXML.Excel
                 case ShowDataAsValues.PercentOfTotal: return XLPivotCalculation.PercentageOfTotal;
                 case ShowDataAsValues.Index: return XLPivotCalculation.Index;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1525,12 +1429,8 @@ namespace ClosedXML.Excel
                 case FilterOperatorValues.GreaterThanOrEqual: return XLFilterOperator.EqualOrGreaterThan;
                 case FilterOperatorValues.LessThanOrEqual: return XLFilterOperator.EqualOrLessThan;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1541,12 +1441,24 @@ namespace ClosedXML.Excel
                 case DynamicFilterValues.AboveAverage: return XLFilterDynamicType.AboveAverage;
                 case DynamicFilterValues.BelowAverage: return XLFilterDynamicType.BelowAverage;
 
-                #region default
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static XLDateTimeGrouping ToClosedXml(this DateTimeGroupingValues value)
+        {
+            switch (value)
+            {
+                case DateTimeGroupingValues.Year: return XLDateTimeGrouping.Year;
+                case DateTimeGroupingValues.Month: return XLDateTimeGrouping.Month;
+                case DateTimeGroupingValues.Day: return XLDateTimeGrouping.Day;
+                case DateTimeGroupingValues.Hour: return XLDateTimeGrouping.Hour;
+                case DateTimeGroupingValues.Minute: return XLDateTimeGrouping.Minute;
+                case DateTimeGroupingValues.Second: return XLDateTimeGrouping.Second;
 
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1558,12 +1470,8 @@ namespace ClosedXML.Excel
                 case SheetViewValues.PageBreakPreview: return XLSheetViewOptions.PageBreakPreview;
                 case SheetViewValues.PageLayout: return XLSheetViewOptions.PageLayout;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1577,12 +1485,8 @@ namespace ClosedXML.Excel
                 case Vml.StrokeLineStyleValues.ThinThick: return XLLineStyle.ThinThick;
                 case Vml.StrokeLineStyleValues.ThinThin: return XLLineStyle.ThinThin;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1609,12 +1513,8 @@ namespace ClosedXML.Excel
                 case ConditionalFormatValues.TimePeriod: return XLConditionalFormatType.TimePeriod;
                 case ConditionalFormatValues.AboveAverage: return XLConditionalFormatType.AboveAverage;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1629,12 +1529,8 @@ namespace ClosedXML.Excel
                 case ConditionalFormatValueObjectValues.Formula: return XLCFContentType.Formula;
                 case ConditionalFormatValueObjectValues.Percentile: return XLCFContentType.Percentile;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1655,12 +1551,8 @@ namespace ClosedXML.Excel
                 case ConditionalFormattingOperatorValues.BeginsWith: return XLCFOperator.StartsWith;
                 case ConditionalFormattingOperatorValues.EndsWith: return XLCFOperator.EndsWith;
 
-                #region default
-
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1686,12 +1578,28 @@ namespace ClosedXML.Excel
                 case IconSetValues.FiveRating: return XLIconSetStyle.FiveRating;
                 case IconSetValues.FiveQuarters: return XLIconSetStyle.FiveQuarters;
 
-                #region default
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static XLTimePeriod ToClosedXml(this TimePeriodValues value)
+        {
+            switch (value)
+            {
+                case TimePeriodValues.Yesterday: return XLTimePeriod.Yesterday;
+                case TimePeriodValues.Today: return XLTimePeriod.Today;
+                case TimePeriodValues.Tomorrow: return XLTimePeriod.Tomorrow;
+                case TimePeriodValues.Last7Days: return XLTimePeriod.InTheLast7Days;
+                case TimePeriodValues.LastWeek: return XLTimePeriod.LastWeek;
+                case TimePeriodValues.ThisWeek: return XLTimePeriod.ThisWeek;
+                case TimePeriodValues.NextWeek: return XLTimePeriod.NextWeek;
+                case TimePeriodValues.LastMonth: return XLTimePeriod.LastMonth;
+                case TimePeriodValues.ThisMonth: return XLTimePeriod.ThisMonth;
+                case TimePeriodValues.NextMonth: return XLTimePeriod.NextMonth;
 
                 default:
-                    throw new ApplicationException("Not implemented value!");
-
-                    #endregion default
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 
@@ -1706,12 +1614,87 @@ namespace ClosedXML.Excel
             {
                 case Xdr.EditAsValues.Absolute:
                     return XLPicturePlacement.FreeFloating;
+
                 case Xdr.EditAsValues.OneCell:
                     return XLPicturePlacement.Move;
+
                 case Xdr.EditAsValues.TwoCell:
                     return XLPicturePlacement.MoveAndSize;
+
                 default:
-                    throw new ArgumentOutOfRangeException();
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static XLPivotAreaValues ToClosedXml(this PivotAreaValues value)
+        {
+            switch (value)
+            {
+                case PivotAreaValues.None:
+                    return XLPivotAreaValues.None;
+
+                case PivotAreaValues.Normal:
+                    return XLPivotAreaValues.Normal;
+
+                case PivotAreaValues.Data:
+                    return XLPivotAreaValues.Data;
+
+                case PivotAreaValues.All:
+                    return XLPivotAreaValues.All;
+
+                case PivotAreaValues.Origin:
+                    return XLPivotAreaValues.Origin;
+
+                case PivotAreaValues.Button:
+                    return XLPivotAreaValues.Button;
+
+                case PivotAreaValues.TopRight:
+                    return XLPivotAreaValues.TopRight;
+
+                case PivotAreaValues.TopEnd:
+                    return XLPivotAreaValues.TopEnd;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "PivotAreaValues value not implemented");
+            }
+        }
+
+        public static XLSparklineType ToClosedXml(this X14.SparklineTypeValues value)
+        {
+            switch (value)
+            {
+                case X14.SparklineTypeValues.Line: return XLSparklineType.Line;
+                case X14.SparklineTypeValues.Column: return XLSparklineType.Column;
+                case X14.SparklineTypeValues.Stacked: return XLSparklineType.Stacked;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static XLSparklineAxisMinMax ToClosedXml(this X14.SparklineAxisMinMaxValues value)
+        {
+            switch (value)
+            {
+                case X14.SparklineAxisMinMaxValues.Individual: return XLSparklineAxisMinMax.Automatic;
+                case X14.SparklineAxisMinMaxValues.Group: return XLSparklineAxisMinMax.SameForAll;
+                case X14.SparklineAxisMinMaxValues.Custom: return XLSparklineAxisMinMax.Custom;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
+            }
+        }
+
+        public static XLDisplayBlanksAsValues ToClosedXml(this X14.DisplayBlanksAsValues value)
+        {
+            switch (value)
+            {
+                case X14.DisplayBlanksAsValues.Span: return XLDisplayBlanksAsValues.Interpolate;
+                case X14.DisplayBlanksAsValues.Gap: return XLDisplayBlanksAsValues.NotPlotted;
+                case X14.DisplayBlanksAsValues.Zero: return XLDisplayBlanksAsValues.Zero;
+
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(value), "Not implemented value!");
             }
         }
 

@@ -1,7 +1,8 @@
-using System;
-using System.Linq;
 using ClosedXML.Excel;
 using NUnit.Framework;
+using System;
+using System.IO;
+using System.Linq;
 
 namespace ClosedXML_Tests
 {
@@ -18,7 +19,7 @@ namespace ClosedXML_Tests
             IXLWorksheet ws = new XLWorkbook().Worksheets.Add("Sheet1");
             IXLCell cell = ws.Cell(1, 1);
             cell.RichText.AddText("12");
-            cell.DataType = XLCellValues.Number;
+            cell.DataType = XLDataType.Number;
 
             Assert.AreEqual(12.0, cell.GetDouble());
 
@@ -30,7 +31,7 @@ namespace ClosedXML_Tests
 
             Assert.AreEqual("1234", cell.GetString());
 
-            Assert.AreEqual(XLCellValues.Number, cell.DataType);
+            Assert.AreEqual(XLDataType.Number, cell.DataType);
 
             Assert.AreEqual(1234.0, cell.GetDouble());
         }
@@ -147,11 +148,11 @@ namespace ClosedXML_Tests
 
             Assert.AreEqual(true, cell.HasRichText);
 
-            cell.DataType = XLCellValues.Text;
+            cell.DataType = XLDataType.Text;
 
             Assert.AreEqual(true, cell.HasRichText);
 
-            cell.DataType = XLCellValues.Number;
+            cell.DataType = XLDataType.Number;
 
             Assert.AreEqual(false, cell.HasRichText);
 
@@ -667,6 +668,95 @@ namespace ClosedXML_Tests
             expected = String.Empty;
             actual = richString.ToString();
             Assert.AreEqual(expected, actual);
+        }
+
+        [Test(Description = "See #1361")]
+        public void CanClearInlinedRichText()
+        {
+            using (var outputStream = new MemoryStream())
+            {
+                using (var inputStream = TestHelper.GetStreamFromResource(TestHelper.GetResourcePath(@"Other\InlinedRichText\ChangeRichText\inputfile.xlsx")))
+                using (var workbook = new XLWorkbook(inputStream))
+                {
+                    workbook.Worksheets.First().Cell("A1").Value = "";
+                    workbook.SaveAs(outputStream);
+                }
+
+                using (var wb = new XLWorkbook(outputStream))
+                {
+                    Assert.AreEqual("", wb.Worksheets.First().Cell("A1").Value);
+                }
+            }
+        }
+
+        [Test]
+        public void CanChangeInlinedRichText()
+        {
+            void testRichText(IXLRichText richText)
+            {
+                Assert.IsNotNull(richText);
+                Assert.IsTrue(richText.Any());
+                Assert.AreEqual("3", richText.ElementAt(2).Text);
+                Assert.AreEqual(XLColor.Red, richText.ElementAt(2).FontColor);
+            }
+
+            using (var outputStream = new MemoryStream())
+            {
+                using (var inputStream = TestHelper.GetStreamFromResource(TestHelper.GetResourcePath(@"Other\InlinedRichText\ChangeRichText\inputfile.xlsx")))
+                using (var workbook = new XLWorkbook(inputStream))
+                {
+                    var richText = workbook.Worksheets.First().Cell("A1").RichText;
+                    testRichText(richText);
+                    richText.AddText(" - changed");
+                    workbook.SaveAs(outputStream);
+                }
+
+                using (var wb = new XLWorkbook(outputStream))
+                {
+                    var cell = wb.Worksheets.First().Cell("A1");
+                    Assert.IsFalse(cell.ShareString);
+                    Assert.IsTrue(cell.HasRichText);
+                    var rt = cell.RichText;
+                    Assert.AreEqual("Year (range: 3 yrs) - changed", rt.ToString());
+                    testRichText(rt);
+                }
+            }
+        }
+
+        [Test]
+        public void ClearInlineRichTextWhenRelevant()
+        {
+            using (var ms = new MemoryStream())
+            {
+                TestHelper.CreateAndCompare(() =>
+                {
+                    using (var wb = new XLWorkbook())
+                    {
+                        var ws = wb.AddWorksheet();
+                        var cell = ws.FirstCell();
+
+                        cell.RichText.AddText("Bold").SetBold().AddText(" and red").SetBold().SetFontColor(XLColor.Red);
+                        cell.ShareString = false;
+
+                        //wb.SaveAs(ms);
+                        wb.SaveAs(ms);
+                    }
+                    ms.Seek(0, SeekOrigin.Begin);
+
+                    var wb2 = new XLWorkbook(ms);
+                    {
+                        var ws = wb2.Worksheets.First();
+                        var cell = ws.FirstCell();
+
+                        cell.FormulaA1 = "=1 + 2";
+                        wb2.SaveAs(ms);
+                    }
+
+                    ms.Seek(0, SeekOrigin.Begin);
+
+                    return wb2;
+                }, @"Other\InlinedRichText\ChangeRichTextToFormula\output.xlsx");
+            }
         }
     }
 }
